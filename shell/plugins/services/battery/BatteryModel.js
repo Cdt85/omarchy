@@ -34,12 +34,3 @@ function profileAfterRead(current, replyText, signalsAtStart, signalsNow) {
   return signalsAtStart === signalsNow ? parseActiveProfile(replyText) : current
 }
 
-if (typeof module !== "undefined") {
-  module.exports = {
-    batteryPercentage: batteryPercentage,
-    isDischarging: isDischarging,
-    shouldWarnLowBattery: shouldWarnLowBattery,
-    parseActiveProfile: parseActiveProfile,
-    profileAfterRead: profileAfterRead
-  }
-}

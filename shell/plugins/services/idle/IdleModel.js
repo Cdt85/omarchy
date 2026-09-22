@@ -24,10 +24,3 @@ function delayAfterFirstIdle(timeoutSeconds, firstIdleSeconds) {
   return delay > 0 ? delay : 0
 }
 
-if (typeof module !== "undefined") {
-  module.exports = {
-    secondsFromConfig: secondsFromConfig,
-    firstIdleTimeout: firstIdleTimeout,
-    delayAfterFirstIdle: delayAfterFirstIdle
-  }
-}

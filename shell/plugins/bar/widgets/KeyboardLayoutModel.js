@@ -132,15 +132,3 @@ function layoutIndex(keyboard) {
   return (keyboard && keyboard.active_layout_index) || 0
 }
 
-if (typeof module !== "undefined") {
-  module.exports = {
-    eventKeyboardName: eventKeyboardName,
-    isTypedKeyboard: isTypedKeyboard,
-    layoutBriefs: layoutBriefs,
-    selectKeyboard: selectKeyboard,
-    shortLabel: shortLabel,
-    inputLabel: inputLabel,
-    inputTooltip: inputTooltip,
-    showIndicator: showIndicator
-  }
-}

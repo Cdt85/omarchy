@@ -6,71 +6,130 @@ source "$(dirname "${BASH_SOURCE[0]}")/base-test.sh"
 
 # QML evaluates a shell JS module again for every delegate whose component
 # imports it, unless the module is `.pragma library`. While it does, any name
-# the module's top level looks up without declaring it walks the delegate's
-# context into Qt's list accessor, and when the Repeater's array model holds a
-# destroyed object that walk crashes Quickshell (#11727). Builtins are no
-# exception: `Math.PI`, `NaN`, `typeof console` and `globalThis` all crash
-# Qt 6.11.2 there. `Qt` is found through the imports first, and `undefined`
-# and `Infinity` compile to constants. Code inside a function only runs when
-# something calls it, so a module stays safe as long as its top level, and
-# anything that top level calls, uses only what the module declares.
+# the module's top level reads or assigns without declaring it walks the
+# delegate's context into Qt's list accessor, and when the Repeater's array
+# model holds a destroyed object that walk crashes Quickshell (#11727).
+# Builtins are no exception: `Math.PI`, `NaN`, `arguments`, `typeof console`,
+# `globalThis` and `leaked = 1` all crash Qt 6.11.2 there. `Qt` and `.import`
+# aliases are found through the imports first, and `undefined` and `Infinity`
+# compile to constants. Code inside a function runs only when something calls
+# it, so a module stays safe as long as its top level, and anything that top
+# level calls, uses only what the module declares.
+
+work_dir=$(mktemp -d)
+trap 'rm -rf "$work_dir"' EXIT
+export MODULE_LIST="$work_dir/modules"
 
 run_node_test <<'JS'
 const fs = require('fs')
 const vm = require('vm')
 
-const SAFE_AT_TOP_LEVEL = new Set(['Qt', 'undefined', 'Infinity'])
+// The header is the run of `.pragma`/`.import` lines, blank lines and
+// comments before the first line of code; a directive anywhere else is not one.
+function moduleHeader(source) {
+  const header = { library: false, aliases: [] }
+  let inComment = false
+  for (const raw of source.split('\n')) {
+    const line = raw.trim()
+    if (inComment) {
+      inComment = !line.includes('*/')
+      continue
+    }
+    if (line === '' || line.startsWith('//')) continue
+    if (line.startsWith('/*')) {
+      inComment = !line.includes('*/')
+      continue
+    }
+    if (/^\.pragma library\b/.test(line)) {
+      header.library = true
+    } else if (line.startsWith('.import ')) {
+      const alias = line.match(/\bas\s+(\w+)\s*;?$/)
+      if (alias) header.aliases.push(alias[1])
+    } else if (!line.startsWith('.pragma ')) {
+      break
+    }
+  }
+  return header
+}
 
 // Runs a module's top level against a global object that records every name
-// looked up on it and answers each with a stub, so evaluation goes on and all
-// of them are seen. The module's own declarations stay local to the wrapper.
-function contextLookups(source) {
+// read or assigned on it. Unknown names answer with a stub so evaluation goes
+// on and later lookups are seen too; the names Qt resolves safely answer with
+// values of the right type, so branches on them go the way they would in Qt.
+// The arrow wrapper keeps the module's declarations local without adding an
+// `arguments` of its own. It errs on the safe side in one way: `this.Math`
+// at the top level is reported, though Qt survives it.
+function contextLookups(source, aliases = []) {
   const seen = new Set()
   const stub = new Proxy(function () {}, {
     get: (target, key) => (key === Symbol.toPrimitive ? () => 0 : stub),
     apply: () => stub,
     construct: () => stub
   })
+  const objectStub = new Proxy({}, { get: (target, key) => (key === Symbol.toPrimitive ? () => 0 : stub) })
+  const safe = new Map([['Qt', objectStub], ['undefined', undefined], ['Infinity', Infinity]])
+  for (const alias of aliases) safe.set(alias, objectStub)
+  const record = (name) => {
+    if (typeof name === 'string' && !safe.has(name)) seen.add(name)
+  }
   const global = new Proxy({}, {
     has(target, name) {
-      if (typeof name === 'string') seen.add(name)
-      return false
+      record(name)
+      return safe.has(name)
     },
     get(target, name) {
-      if (typeof name === 'string') seen.add(name)
-      return stub
+      record(name)
+      return safe.has(name) ? safe.get(name) : stub
+    },
+    set(target, name) {
+      record(name)
+      return true
+    },
+    defineProperty(target, name) {
+      record(name)
+      return true
     }
   })
   const body = source.replace(/^\.(pragma|import) .*$/gm, '')
   try {
-    vm.runInContext(`(function () {\n${body}\n})()`, vm.createContext(global))
+    vm.runInContext(`(() => {\n${body}\n})()`, vm.createContext(global), { timeout: 500 })
   } catch (error) {
-    seen.add(`(top level threw: ${error.message})`)
+    seen.add(`(top level did not finish: ${error.message})`)
   }
-  return [...seen].filter((name) => !SAFE_AT_TOP_LEVEL.has(name)).sort()
+  return [...seen].sort()
 }
 
-// Each of these was run against Qt 6.11.2 as a delegate's module: the first
-// group crashes it, the second does not.
+// Each snippet was run in Qt 6.11.2 as the module of a delegate whose
+// Repeater's model holds a destroyed object: the first group crashes it, the
+// second does not.
 const crashes = {
   'a typeof module guard': 'if (typeof module !== "undefined") module.exports = { f: f }',
   'a parenthesised guard': 'if (typeof(module) !== "undefined") module["exports"] = { f: f }',
   'a global through globalThis': 'var m = globalThis.module',
   'a builtin': 'var TAU = Math.PI * 2',
   'a builtin reached through a top-level call': 'function tau() { return Math.PI * 2 }\nvar TAU = tau()',
-  'NaN': 'var missing = NaN'
+  'NaN': 'var missing = NaN',
+  'arguments': 'var x = arguments',
+  'an assignment to an undeclared name': 'leaked = 1',
+  'a builtin behind a branch on Infinity': 'if (Infinity === 1 / 0) var p = Math.PI',
+  'a builtin behind a branch on Qt': 'if (typeof Qt === "object") var p = Math.PI'
 }
 const safe = {
   'builtins inside a function': 'function tau() { return Math.PI * 2 }',
   'local declarations and literals': 'var a = 1\nconst b = { c: [a, 2], d: "x".toUpperCase(), e: /x+/g }\nvar f = b.c.map(function (x) { return x * 2 })',
-  'Qt, undefined and Infinity': 'var hasQt = typeof Qt !== "undefined"\nvar u = undefined\nvar big = Infinity'
+  'Qt, undefined and Infinity': 'var hasQt = typeof Qt !== "undefined"\nvar u = undefined\nvar big = Infinity',
+  'an .import alias': '.import "Lib.js" as Lib\nvar half = Lib.half'
 }
 for (const [name, source] of Object.entries(crashes)) {
   assert(contextLookups(source).length > 0, `the module scope check catches ${name}`)
 }
 for (const [name, source] of Object.entries(safe)) {
-  assertDeepEqual(contextLookups(source), [], `the module scope check allows ${name}`)
+  assertDeepEqual(contextLookups(source, moduleHeader(source).aliases), [], `the module scope check allows ${name}`)
 }
+assert(contextLookups('var q = Qt.application.arguments\nwhile (q.length) q.pop()').length > 0, 'the module scope check gives up on a top level that does not finish')
+assert(moduleHeader('// Sun position\n.pragma library\n.import "GlobeModel.js" as Solar\n').library, 'a .pragma library header after a comment counts')
+assert(!moduleHeader('/*\n.pragma library\n*/\nvar a = 1\n').library, 'a .pragma library inside a comment does not count')
+assert(!moduleHeader('var a = 1\n.pragma library\n').library, 'a .pragma library after code does not count')
 
 function shellModules(dir) {
   return fs.readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
@@ -81,42 +140,42 @@ function shellModules(dir) {
 }
 
 const offenders = []
-let checked = 0
-for (const file of shellModules(path.join(root, 'shell'))) {
+const checked = []
+for (const file of shellModules(path.join(root, 'shell')).sort()) {
   const source = fs.readFileSync(file, 'utf8')
-  if (/^\.pragma library\b/m.test(source)) continue
-  checked++
-  const names = contextLookups(source)
+  const header = moduleHeader(source)
+  if (header.library) continue
+  checked.push(file)
+  const names = contextLookups(source, header.aliases)
   if (names.length) offenders.push(`${path.relative(root, file)}: ${names.join(', ')}`)
 }
-assert(checked > 30, 'the module scope check finds the shell JS modules', `checked ${checked}`)
+fs.writeFileSync(process.env.MODULE_LIST, checked.map((file) => `${file}\n`).join(''))
+assert(checked.length > 30, 'the module scope check finds the shell JS modules', `checked ${checked.length}`)
 assert(
   offenders.length === 0,
-  'shell JS modules look up nothing at their top level that they do not declare',
+  'shell JS modules read and assign nothing at their top level that they do not declare',
   offenders.join('\n')
 )
 JS
 
-# The same thing in Qt itself, where it is installed: a Repeater per module
+# The Node check only sees the paths a module's top level takes against its
+# stubs. Where Qt is installed, run the real thing too: a Repeater per module
 # whose array model keeps getting a destroyed object, and a delegate that
-# imports the module.
+# imports the module. Qt reports a module whose top level throws and carries
+# on, so anything it prints besides the closing line fails the check as well.
 qml_bin=$(command -v qml6 || command -v qml || ls /usr/lib/qt6/bin/qml 2>/dev/null || true)
 if [[ -z $qml_bin ]]; then
   skip "shell JS modules survive delegate creation in Qt (Qt's qml runtime is not installed)"
   exit 0
 fi
 
-work_dir=$(mktemp -d)
-trap 'rm -rf "$work_dir"' EXIT
-
 repeaters=""
 index=0
 while IFS= read -r module; do
-  grep -q '^\.pragma library' "$module" && continue
   (( ++index ))
   printf 'import QtQuick\nimport "file://%s" as Module\nItem { property string label: String(modelData) }\n' "$module" >"$work_dir/Row$index.qml"
   repeaters+="  Repeater { model: root.rows; delegate: Row$index {} }"$'\n'
-done < <(find "$ROOT/shell" -name '*.js' | sort)
+done <"$MODULE_LIST"
 
 cat >"$work_dir/main.qml" <<QML
 import QtQuick
@@ -148,7 +207,7 @@ QML
 
 status=0
 output=$(ulimit -c 0; QT_QPA_PLATFORM=offscreen QT_FORCE_STDERR_LOGGING=1 timeout 60 "$qml_bin" "$work_dir/main.qml" 2>&1) || status=$?
-if (( status == 0 )) && [[ $output == *"survived 10"* ]]; then
+if (( status == 0 )) && [[ $output == "qml: survived 10" ]]; then
   pass "$index shell JS modules survive delegate creation in Qt"
 else
   fail "$index shell JS modules survive delegate creation in Qt" "exit $status: $output"

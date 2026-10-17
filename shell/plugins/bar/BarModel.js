@@ -670,4 +670,3 @@ function peeksAt(position, edge, vertical) {
 function nextPeekEdge(edge, measured, held) {
   return held ? edge : measured
 }
-

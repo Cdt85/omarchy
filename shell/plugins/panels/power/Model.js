@@ -109,4 +109,3 @@ function profileLabel(name, tr) {
   if (value === "performance") return t("power.profilePerformance", "Performance")
   return value.charAt(0).toUpperCase() + value.slice(1)
 }
-

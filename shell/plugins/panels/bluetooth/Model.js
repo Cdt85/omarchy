@@ -153,4 +153,3 @@ function sectionDevices(lists, section) {
   if (section === "discovered") return lists.discovered || []
   return []
 }
-

@@ -131,4 +131,3 @@ function showIndicator(layoutLabel, multipleLayouts, multipleInputs) {
 function layoutIndex(keyboard) {
   return (keyboard && keyboard.active_layout_index) || 0
 }
-

@@ -284,4 +284,3 @@ function iconForCode(code, night) {
     default: return ""
   }
 }
-

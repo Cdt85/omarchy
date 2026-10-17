@@ -113,4 +113,3 @@ function parseDisplays(raw) {
     enabledDisplayCount: count
   }
 }
-

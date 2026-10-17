@@ -10,4 +10,3 @@ function temperatureFromOutput(output) {
 function isNightlight(temperature) {
   return temperature !== null && temperature !== undefined && temperature < IDENTITY_TEMPERATURE
 }
-

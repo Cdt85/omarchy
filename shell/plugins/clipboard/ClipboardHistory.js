@@ -218,4 +218,3 @@ function displayRows(history, query, limit, tr, trn, fmt) {
 
   return rows
 }
-

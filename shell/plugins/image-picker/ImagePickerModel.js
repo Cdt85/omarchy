@@ -155,4 +155,3 @@ function syncWindow(model, items) {
     }
   }
 }
-

@@ -135,4 +135,3 @@ function fileMeta(file, nowMs, tr, fmt) {
   if (folder !== "") parts.push(folder)
   return parts.join(" · ")
 }
-

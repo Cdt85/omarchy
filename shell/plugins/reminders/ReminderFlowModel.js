@@ -12,4 +12,3 @@ function reminderArgs(minutes, message) {
   if (text.length > 0) args.push(text)
   return args
 }
-

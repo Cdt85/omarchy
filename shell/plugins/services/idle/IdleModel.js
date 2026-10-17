@@ -23,4 +23,3 @@ function delayAfterFirstIdle(timeoutSeconds, firstIdleSeconds) {
   var delay = timeoutSeconds - firstIdleSeconds
   return delay > 0 ? delay : 0
 }
-

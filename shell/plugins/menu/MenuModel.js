@@ -683,4 +683,3 @@ function applyTranslations(items, catalog) {
   }
   return out
 }
-

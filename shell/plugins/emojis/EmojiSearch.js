@@ -36,4 +36,3 @@ function filterEmojis(emojis, query, limit) {
 
   return out
 }
-

@@ -413,4 +413,3 @@ function shouldRepromptPassphrase(reason, needsCredentials, reasons) {
   if (!needsCredentials) return false
   return reason === r.NoSecrets || reason === r.WifiAuthTimeout
 }
-

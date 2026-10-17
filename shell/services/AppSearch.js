@@ -120,4 +120,3 @@ function sortedEntries(values, query, hiddenCallback) {
 
   return rows
 }
-

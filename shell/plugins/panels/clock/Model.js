@@ -286,4 +286,3 @@ function stepMonth(year, month, delta) {
   var target = new Date(Date.UTC(year, Number(month) + Number(delta), 1))
   return { year: target.getUTCFullYear(), month: target.getUTCMonth() }
 }
-

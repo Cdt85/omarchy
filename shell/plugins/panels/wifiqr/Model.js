@@ -28,4 +28,3 @@ function parseQrMatrix(lines) {
 
   return { rows: lines, size: size }
 }
-

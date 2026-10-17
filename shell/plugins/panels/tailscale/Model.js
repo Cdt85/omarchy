@@ -307,4 +307,3 @@ function parseAccounts(raw, tr) {
     return { accounts: [], selectedAccountId: "", selectedAccountLabel: "" }
   }
 }
-

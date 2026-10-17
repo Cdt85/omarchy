@@ -132,4 +132,3 @@ function volumeKeyStep(action, percent, muted) {
 function volumeOsdIcon(percent, muted) {
   return muted || percent === 0 ? "volume-muted" : "volume-high"
 }
-

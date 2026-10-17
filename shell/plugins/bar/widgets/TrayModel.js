@@ -63,4 +63,3 @@ function shownSpan(clipStart, clipLength, start, length) {
   }
   return { start: from, length: to - from }
 }
-

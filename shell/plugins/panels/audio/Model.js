@@ -272,4 +272,3 @@ function isUntypedSource(node, sourceAvailability) {
   var name = String(node.name || "")
   return name !== "" && !!sourceAvailability && Object.prototype.hasOwnProperty.call(sourceAvailability, name)
 }
-

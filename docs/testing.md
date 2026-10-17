@@ -122,7 +122,9 @@ its declared name, each declaration that starts a line as `function name(` or
 `const`, `let` or `var name =`. It finds them with a regex, so a declaration
 the tests need is written in that form: not indented, destructured, or split
 across lines. Keeping `module` out of the files keeps QML from looking it up
-while it builds a delegate. That is what makes the shell's model logic unit-testable without a
+while it builds a delegate, a lookup that crashes Quickshell when a Repeater's
+model holds a destroyed object (#11727). `shell-js-module-guard-test.sh` fails
+when a shell module uses `module`, `exports` or `require` again. That is what makes the shell's model logic unit-testable without a
 compositor.
 
 `run_node_test` is the bridge: it prepends a JS prelude to a heredoc and pipes

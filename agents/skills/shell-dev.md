@@ -50,6 +50,10 @@ The shell runs all day on battery, and a widget is built once per monitor, so a 
 
 Polling is the last resort, kept for state with no change signal at all (a remote API, say). Then gate the timer on the panel being open where you can, pick the longest interval the UI can tolerate, and put the poll in one shared service rather than in a per-monitor widget. Never poll a privileged probe: every `sudo -n` can write to the auth log.
 
+## JavaScript modules
+
+A `.js` file imported with `import "X.js" as X` is evaluated again for every delegate whose component imports it, unless it starts with `.pragma library`, and its top level runs in that delegate's context. Any name the top level looks up without declaring it walks the delegate's context, and when a `Repeater`'s array model holds a destroyed object, that walk crashes Quickshell (#11727). Builtins count: `Math.PI`, `NaN`, `typeof console` and `globalThis` at the top level all crash it. Keep a module's top level to its own declarations and literals, and look builtins up inside functions; a module that needs no QML context can be `.pragma library` instead. Don't add CommonJS exports either: tests load the modules through `test/shell.d/js-model-loader.js`. `test/shell.d/shell-js-module-scope-test.sh` checks every module under `shell/`. The same applies to modules in third-party plugins.
+
 ## Editing widget files with glyphs
 
 Widget files in `shell/plugins/bar/widgets/` contain Nerd Font glyphs as raw

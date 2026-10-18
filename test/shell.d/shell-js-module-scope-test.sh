@@ -220,7 +220,7 @@ $repeaters
 QML
 
 status=0
-output=$(ulimit -c 0; QT_QPA_PLATFORM=offscreen QT_FORCE_STDERR_LOGGING=1 QT_LOGGING_RULES="*.debug=false;*.info=false;*.warning=true;*.critical=true" QT_MESSAGE_PATTERN="%{message}" timeout 60 "$qml_bin" "$work_dir/main.qml" 2>&1) || status=$?
+output=$(ulimit -c 0; LC_ALL=C.UTF-8 QT_QPA_PLATFORMTHEME= QT_QPA_PLATFORM=offscreen QT_FORCE_STDERR_LOGGING=1 QT_LOGGING_RULES="*.debug=false;*.info=false;*.warning=true;*.critical=true" QT_MESSAGE_PATTERN="%{message}" timeout 60 "$qml_bin" "$work_dir/main.qml" 2>&1) || status=$?
 if (( status == 0 )) && [[ $output == "survived 10" ]]; then
   pass "$index shell JS modules survive delegate creation in Qt"
 else

@@ -326,3 +326,92 @@ if /usr/bin/bash "$ROOT/bin/omarchy-user-helper" list 2>/dev/null; then
   fail "the helper refuses a Bash not started with -p"
 fi
 pass "the helper refuses to start outside a privileged Bash"
+
+# --- omarchy-login-select, before every SDDM start ---
+
+autologin_file=$tmp/etc/sddm.conf.d/autologin.conf
+slot_record=$tmp/run/omarchy/luks-slot
+
+select_login() {
+  (
+    export USERS_DIR=$tmp/etc/omarchy/users USERS_JOURNAL=$tmp/var/journal USERS_SHADOW=$tmp/shadow USERS_LIFECYCLE_DISPATCH=omarchy-lifecycle-dispatch
+    export LOGIN_SELECT_AUTOLOGIN=$autologin_file LOGIN_SELECT_SLOT_RECORD=$slot_record
+    "$ROOT/bin/omarchy-login-select"
+  )
+}
+
+static_owner_autologin() {
+  mkdir -p "${autologin_file%/*}"
+  printf '[Autologin]\nUser=dhh\nSession=omarchy.desktop\n' >"$autologin_file"
+}
+
+record_slot() {
+  mkdir -p "${slot_record%/*}"
+  echo "$1" >"$slot_record"
+}
+
+autologin_user() {
+  [[ -f $autologin_file ]] && awk -F= '$1 == "User" { print $2 }' "$autologin_file"
+  true
+}
+
+reset_system
+static_owner_autologin
+select_login
+[[ $(autologin_user) == "dhh" ]] || fail "before anyone is added, the installer's autologin stands"
+pass "before Setup > Users adds anyone, login selection leaves the installer's autologin alone"
+
+users users_add dhh child emma kidpass ownerpw 2>/dev/null
+select_login
+[[ ! -f $autologin_file ]] || fail "with two accounts and no unlock record, the owner's static autologin is gone"
+pass "the moment a second person has a disk key, the owner's static autologin is gone"
+
+record_slot "uuid-root 1"
+select_login
+[[ $(autologin_user) == "emma" ]] || fail "the slot that unlocked the disk picks its account"
+grep -qx 'Relogin=false' "$autologin_file" || fail "the autologin never logs back in after a logout"
+select_login
+[[ ! -f $autologin_file ]] || fail "a second SDDM start in the same boot shows the login screen"
+pass "the unlocking slot picks its account once, and a restarted SDDM shows the login screen"
+
+record_slot "uuid-root 0"
+select_login
+[[ $(autologin_user) == "dhh" ]] || fail "the owner's slot picks the owner"
+record_slot "uuid-other 1"
+select_login
+[[ ! -f $autologin_file ]] || fail "a record for another volume picks nobody"
+record_slot "uuid-root 9"
+select_login
+[[ ! -f $autologin_file ]] || fail "an unmapped slot picks nobody"
+printf 'emma:outofband\n' | chpasswd
+record_slot "uuid-root 1"
+select_login
+[[ ! -f $autologin_file ]] || fail "a drifted account is not picked by its old slot"
+pass "a record for another volume, an unmapped slot, or a drifted account shows the login screen"
+
+reset_system
+users users_add dhh child emma kidpass ownerpw 2>/dev/null
+printf 'op=add\nuser=x\nphase=account\n' >"$tmp/var/journal"
+record_slot "uuid-root 1"
+select_login
+[[ ! -f $autologin_file ]] || fail "an unfinished change picks nobody"
+rm -f "$tmp/var/journal"
+echo "uuid-root 1 1001 emma x" >>"$tmp/etc/omarchy/users/slots"
+record_slot "uuid-root 1"
+select_login
+[[ ! -f $autologin_file ]] || fail "a map naming a slot twice picks nobody"
+pass "an unfinished change or an inconsistent map shows the login screen"
+
+reset_system
+users users_add dhh child emma kidpass ownerpw 2>/dev/null
+users users_delete dhh emma ownerpw yes 2>/dev/null
+select_login
+[[ $(autologin_user) == "dhh" ]] || fail "back to one account, its autologin returns"
+pass "back to one account on an encrypted disk, that account is logged in again"
+
+reset_system unencrypted
+users users_add dhh child emma kidpass ownerpw 2>/dev/null
+static_owner_autologin
+select_login
+[[ ! -f $autologin_file ]] || fail "an unencrypted install with users shows the login screen"
+pass "an unencrypted install with people added always shows the login screen"

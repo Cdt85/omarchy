@@ -1,0 +1,54 @@
+#!/bin/bash
+
+# omarchy:hidden=true
+# omarchy:summary=Choose whose desktop SDDM opens at this start
+# omarchy:requires-sudo=true
+
+# Runs as root before every SDDM start (sddm.service.d/omarchy-login-select.conf).
+# Until Setup > Users first adds someone it leaves the installer's autologin
+# alone. After that it owns the autologin drop-in: removed first, so a failure
+# shows the login screen, then written for the one account on an encrypted
+# disk, or, with more than one, for the account whose key slot unlocked the
+# disk this boot, used once.
+
+set -uo pipefail
+
+: "${LOGIN_SELECT_AUTOLOGIN:=/etc/sddm.conf.d/autologin.conf}"
+: "${LOGIN_SELECT_SLOT_RECORD:=/run/omarchy/luks-slot}"
+
+entrypoint=$(readlink -e -- "${BASH_SOURCE[0]}") || exit 1
+source "${entrypoint%/*}/omarchy-user-functions" || exit 1
+
+[[ -d $USERS_DIR ]] || exit 0
+
+rm -f "$LOGIN_SELECT_AUTOLOGIN" || exit 1
+
+autologin() {
+  mkdir -p "${LOGIN_SELECT_AUTOLOGIN%/*}" &&
+    printf '[Autologin]\nUser=%s\nSession=omarchy.desktop\nRelogin=false\n' "$1" >"$LOGIN_SELECT_AUTOLOGIN.tmp" &&
+    mv -f "$LOGIN_SELECT_AUTOLOGIN.tmp" "$LOGIN_SELECT_AUTOLOGIN"
+}
+
+# The record the unlock left, renamed so no later start this boot reuses it.
+consume_slot_record() {
+  local record=$LOGIN_SELECT_SLOT_RECORD.used
+  [[ -f $LOGIN_SELECT_SLOT_RECORD ]] || return 1
+  mv -f "$LOGIN_SELECT_SLOT_RECORD" "$record" || return 1
+  cat "$record"
+}
+
+users_load_drive || exit 1
+users_encrypted || exit 0
+mapfile -t accounts < <(users_accounts)
+
+if (( ${#accounts[@]} == 1 )); then
+  autologin "${accounts[0]}"
+elif (( ${#accounts[@]} > 1 )); then
+  read -r uuid slot < <(consume_slot_record) || exit 0
+  [[ $uuid == "$USERS_UUID" && $slot =~ ^[0-9]+$ ]] || exit 0
+  ! users_journal_pending || exit 0
+  users_map_valid || exit 0
+  user=$(users_map_user_for_slot "$uuid" "$slot")
+  [[ -n $user ]] && users_exists "$user" && users_in_sync "$user" || exit 0
+  autologin "$user"
+fi

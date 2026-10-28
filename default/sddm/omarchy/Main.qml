@@ -7,19 +7,36 @@ Rectangle {
   height: 480
   color: "#1a1b26"
 
-  // With more than one account the screen names whose password it asks for,
-  // and the arrow keys switch accounts; only the account shown is ever tried,
-  // so a typo never counts against anyone else's failed-login limit.
-  property int userIndex: Math.max(0, userModel.lastIndex)
-  property string currentUser: userNames.count > 0 && userNames.itemAt(userIndex) ? userNames.itemAt(userIndex).userName : userModel.lastUser
+  // A password alone, as at the disk prompt: it is tried for the last account
+  // and then each other one until one logs in. omarchy-login-match ends an
+  // attempt at once when the password is another account's, so only a
+  // password that is nobody's counts as a failed login.
   property bool loginFailed: false
+  property var candidates: []
+  property int attempt: 0
+  property string pending: ""
+  // SDDM sends LoginFailed twice for one failure; only the first answers.
+  property bool awaiting: false
 
-  function switchUser(step) {
-    if (userNames.count < 2)
+  function login() {
+    var names = [userModel.lastUser]
+    for (var i = 0; i < userNames.count; i++) {
+      var name = userNames.itemAt(i) ? userNames.itemAt(i).userName : ""
+      if (name && names.indexOf(name) === -1)
+        names.push(name)
+    }
+    candidates = names.filter(function(name) { return !!name })
+    if (candidates.length === 0)
       return
-    userIndex = (userIndex + step + userNames.count) % userNames.count
-    password.text = ""
-    loginFailed = false
+    pending = password.text
+    attempt = 0
+    send()
+  }
+
+  function send() {
+    awaiting = true
+    sddm.login(candidates[attempt], pending, sessionIndex)
+    unanswered.restart()
   }
 
   Repeater {
@@ -42,13 +59,42 @@ Rectangle {
   Connections {
     target: sddm
     function onLoginFailed() {
-      root.loginFailed = true
+      if (!root.awaiting)
+        return
+      root.awaiting = false
+      unanswered.stop()
+      if (root.pending !== "" && root.attempt + 1 < root.candidates.length) {
+        root.attempt++
+        nextAttempt.start()
+        return
+      }
+      root.pending = ""
       password.text = ""
+      root.loginFailed = true
       password.focus = true
     }
     function onLoginSucceeded() {
+      root.awaiting = false
+      unanswered.stop()
+      root.pending = ""
       root.loginFailed = false
     }
+  }
+
+  // SDDM reports a failure before its helper has exited, and silently drops a
+  // login sent before then, so the next account waits a moment; an attempt
+  // still unanswered after pam_unix's failure delay was dropped, and is sent
+  // again. One sent while the first is still running is dropped the same way.
+  Timer {
+    id: nextAttempt
+    interval: 300
+    onTriggered: root.send()
+  }
+
+  Timer {
+    id: unanswered
+    interval: 5000
+    onTriggered: if (root.pending !== "") root.send()
   }
 
   Column {
@@ -61,15 +107,6 @@ Rectangle {
       width: Math.min(sourceSize.width, root.width * 0.8)
       height: sourceSize.width > 0 ? Math.round(width * sourceSize.height / sourceSize.width) : 0
       fillMode: Image.PreserveAspectFit
-      anchors.horizontalCenter: parent.horizontalCenter
-    }
-
-    Text {
-      text: "\u2039  " + root.currentUser + "  \u203a"
-      visible: userNames.count > 1
-      color: "#a9b1d6"
-      font.family: "JetBrainsMono Nerd Font"
-      font.pixelSize: 22
       anchors.horizontalCenter: parent.horizontalCenter
     }
 
@@ -131,15 +168,9 @@ Rectangle {
 
           onTextChanged: root.loginFailed = false
 
-          Keys.onPressed: {
-            if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
-              sddm.login(root.currentUser, password.text, root.sessionIndex)
-              event.accepted = true
-            } else if (event.key === Qt.Key_Left || event.key === Qt.Key_Backtab) {
-              root.switchUser(-1)
-              event.accepted = true
-            } else if (event.key === Qt.Key_Right || event.key === Qt.Key_Tab) {
-              root.switchUser(1)
+          Keys.onPressed: function(event) {
+            if ((event.key === Qt.Key_Return || event.key === Qt.Key_Enter) && root.pending === "") {
+              root.login()
               event.accepted = true
             }
           }

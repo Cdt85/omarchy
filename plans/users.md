@@ -1,6 +1,6 @@
 # Plan: Users — more than one person per machine, picked by password
 
-Revision 2. Rev 2 incorporates adversarial review by codex (medium): the first change that adds a second disk key also retires the static owner autologin, the boot selection is a one-use authorisation consumed at each SDDM start, the initramfs wrapper runs `cryptsetup` once and never changes its exit status, the login screen selects an account instead of discovering it through failed logins, uniqueness is checked against the disk's slots as well as the login hashes, the slot map is bound to the volume, account changes are journaled under one root lock, a child's own password change goes through a narrow helper, and root's password has an owner.
+Revision 3. Rev 3 makes the login screen a password alone that finds its account, with `omarchy-login-match` ending attempts on the wrong account before they count. Rev 2 incorporates adversarial review by codex (medium): the first change that adds a second disk key also retires the static owner autologin, the boot selection is a one-use authorisation consumed at each SDDM start, the initramfs wrapper runs `cryptsetup` once and never changes its exit status, the login screen selects an account instead of discovering it through failed logins, uniqueness is checked against the disk's slots as well as the login hashes, the slot map is bound to the volume, account changes are journaled under one root lock, a child's own password change goes through a narrow helper, and root's password has an owner.
 
 ## Problem
 
@@ -16,7 +16,7 @@ This plan keeps Omarchy's "type your password and you're in" for every person on
 
 - **Every account's password is also its own LUKS key slot.** Typing your password at the disk prompt opens the disk *and* tells the machine who you are.
 - **The slot that opened the disk picks the autologin, once.** The selection is consumed by the SDDM start it was made for; any later SDDM start in the same boot shows the login screen.
-- **No username box anywhere.** The disk prompt and the lock screen take only a password; the login screen shows whose password it is asking for and switches between accounts with the arrow keys.
+- **No username box anywhere.** The disk prompt, the login screen and the lock screen take only a password; the disk prompt and the login screen find the account it belongs to.
 - **Adults are in `wheel`; children are not.** A child is a limited account in the `omarchy-child` group, which later features (screen time, an app list) key on. Admin work happens in an adult's own session, never by typing an adult's password into a child's.
 - **One account behaves exactly as today.** Nothing changes until a second account is added, and deleting back down to one restores today's setup for whoever remains.
 
@@ -78,9 +78,11 @@ Hibernation resume never reaches SDDM and is unaffected. Apple Silicon boots a s
 
 ## The login screen
 
-The Omarchy SDDM theme is a single password field that logs in as `userModel.lastUser`. It stays a single password field, with the selected account's name shown above it. Left and Right (and Tab) cycle through `userModel`, starting at the last user; Return logs in as the name shown. There is nothing to type but the password, and only the account shown is ever tried, so one person's typo is never charged to another person's `faillock` tally.
+The Omarchy SDDM theme is a single password field, and it stays one: no name, no arrows. Return tries the password for `userModel.lastUser`, then for each other account in `userModel`, until one logs in, the way the disk prompt finds a key slot.
 
-Matching the password against every account was considered and rejected: SDDM's greeter can only call `sddm.login(user, password, session)`, so discovering the account means a failed PAM login against each wrong one. A correct password for B would first count a failure against A, every mistyped attempt would count against every account (`deny=10`, `unlock_time=120` in `system-auth`), and SDDM drops a second `login` sent before the first helper has exited, so the chain would also race.
+SDDM's greeter can only call `sddm.login(user, password, session)`, so on its own that would be a failed PAM login against every wrong account: a correct password for B would first count against A, and pay `pam_unix`'s delay. So the first line of `/etc/pam.d/sddm` is `auth [success=die default=ignore] pam_exec.so quiet expose_authtok /usr/bin/omarchy-login-match`. As root, it succeeds, which ends the attempt before `pam_unix` and `faillock`, only when the password belongs to another account; a correct password and a password that is nobody's fall through to the usual stack, and so does any failure of the script, which fails open to the stack as it was. Linux-PAM never returns success from a `die` on a successful module, so ending the attempt can only refuse it.
+
+A password that is nobody's is still tried for every account, and counts once against each (`deny=10`, `unlock_time=120` in `system-auth`). That is what a guess at a password-only screen is: a guess at every account, as at the disk prompt. The theme sends the next attempt only after SDDM reports the last one failed, because SDDM drops a `login` sent while another is in flight.
 
 Unencrypted installs use the same screen. The lock screen is unchanged: it belongs to one session and knows its user.
 
@@ -129,7 +131,7 @@ From #16100, without its disk and login-screen model:
 
 ## Phases
 
-1. **Accounts and the login screen, together.** `omarchy-user-helper` with its journal, lock and authorisation; `omarchy user list|add|delete|password`; the slot map with fingerprints; password rules in the helper and the setup form; the `%wheel` drop-in; root's holder; _Setup > Users_; retiring _Update > Password_'s two entries; the theme's account switching; and `omarchy-login-select` in its one-account and login-screen modes. This phase must ship whole: from the moment a second person has a disk key, the static owner autologin is gone and every boot with more than one account shows the login screen.
+1. **Accounts and the login screen, together.** `omarchy-user-helper` with its journal, lock and authorisation; `omarchy user list|add|delete|password`; the slot map with fingerprints; password rules in the helper and the setup form; the `%wheel` drop-in; root's holder; _Setup > Users_; retiring _Update > Password_'s two entries; the theme's password matching with `omarchy-login-match`; and `omarchy-login-select` in its one-account and login-screen modes. This phase must ship whole: from the moment a second person has a disk key, the static owner autologin is gone and every boot with more than one account shows the login screen.
 2. **Boot selection.** The `omarchy-luks-slot` hook, proven on a worker built from the ISO across every unlock path, then `omarchy-login-select` consuming its record.
 3. **Children.** Blocked apps, theme collections, screen time with an adult's password, the web allowlist, an adult's password on a child's lock screen, and System > Switch User; then declined admin entries, polkit coverage and the Apple Silicon keyring source.
 

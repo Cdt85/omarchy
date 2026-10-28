@@ -93,6 +93,19 @@ users_password_matches() {
   users_password_matches_hash "$1" "$(users_shadow_hash "$2")"
 }
 
+# The account whose password this is, as the disk prompt finds one by its key
+# slot. Accounts share no password, so there is at most one.
+users_password_owner() {
+  local password=$1 user
+  for user in $(users_accounts); do
+    if users_password_matches "$password" "$user"; then
+      echo "$user"
+      return 0
+    fi
+  done
+  return 1
+}
+
 # Changes whenever the account's shadow password does, without holding it.
 users_fingerprint() {
   users_shadow_hash "$1" | sha256sum | cut -c1-16

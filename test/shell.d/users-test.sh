@@ -654,3 +654,11 @@ users users_finish 2>/dev/null || fail "a delete stopped mid-handoff is finished
 grep -qx -- '-L root' "$tmp/usermod" || fail "root is locked when its handoff is in doubt"
 [[ $(cat "$tmp/etc/omarchy/users/root") == "bob" ]] && ! getent passwd dhh >/dev/null || fail "the holder is the adult who deleted, and the delete finishes"
 pass "a delete stopped mid-handoff locks root, names the new holder, and finishes"
+
+# --- The login screen finds the account by its password ---
+
+reset_system
+users users_add dhh child emma kidpass1 ownerpw 2>/dev/null
+[[ $(users users_password_owner kidpass1) == emma && $(users users_password_owner ownerpw) == dhh ]] || fail "each password names its own account"
+! users users_password_owner nobodys1 >/dev/null || fail "a password that is nobody's names no account"
+pass "a password names the one account it belongs to, and nobody's names none"

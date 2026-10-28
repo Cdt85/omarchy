@@ -37,7 +37,7 @@ SH
 fake loginctl <<'SH'
 #!/bin/bash
 if [[ $1 == "list-sessions" ]]; then
-  echo '[{"session":"2","user":"dhh","seat":"seat0","class":"user"},{"session":"5","user":"emma","seat":null,"class":"manager"},{"session":"6","user":"emma","seat":"seat0","class":"user"},{"session":"9","user":"bob","seat":null,"class":"user"}]'
+  echo '[{"session":"2","user":"dhh","seat":"seat0","class":"user","tty":"tty1"},{"session":"5","user":"emma","seat":null,"class":"manager"},{"session":"6","user":"emma","seat":"seat0","class":"user"},{"session":"9","user":"bob","seat":null,"class":"user"}]'
 else
   echo "loginctl $*" >>"$TEST_TMP/calls"
 fi
@@ -58,7 +58,7 @@ switch emma
 pass "switching to someone signed in locks this desktop, then opens their graphical session"
 
 switch bob
-[[ $(cat "$tmp/calls") == $'lock\nbusctl SwitchToGreeter' ]] || fail "switching to someone with no desktop opens the login screen" "$(cat "$tmp/calls")"
+[[ $(cat "$tmp/calls") == $'lock\nbusctl 2\nbusctl SwitchToGreeter' ]] || fail "switching to someone with no desktop moves to a free VT, then opens the login screen" "$(cat "$tmp/calls")"
 pass "switching to someone with no desktop running opens the login screen"
 
 if TEST_NO_LOCK=1 switch emma 2>/dev/null; then fail "a desktop that did not lock switches nothing"; fi

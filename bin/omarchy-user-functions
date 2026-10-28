@@ -233,12 +233,27 @@ users_kill_slot() {
 
 # --- Durable files -------------------------------------------------------------
 
+# Makes DIR with MODE. A missing parent is made 755, never with the helper's
+# umask 077: a private /etc/omarchy would hide every person's settings under
+# it from their own session.
+users_make_dir() {
+  local dir=$1 mode=$2
+  [[ -d ${dir%/*} ]] || users_make_dir "${dir%/*}" 755 || return 1
+  [[ -d $dir ]] || mkdir "$dir" || return 1
+  chmod "$mode" "$dir"
+}
+
+# A directory every session reads, under a parent every session can reach.
+users_make_public_dir() {
+  users_make_dir "${1%/*}" 755 && users_make_dir "$1" 755
+}
+
 # Written whole, synced, then renamed and the directory synced, so a power cut
 # leaves the old file or the new one, never a LUKS change without the record
 # that explains it.
 users_write_atomically() {
   local target=$1 tmp
-  mkdir -p "${target%/*}" && chmod 700 "${target%/*}" || return 1
+  users_make_dir "${target%/*}" 700 || return 1
   tmp=$(mktemp "${target%/*}/.${target##*/}.XXXXXX") || return 1
   if cat >"$tmp" && chmod 600 "$tmp" && sync "$tmp" && mv -f "$tmp" "$target"; then
     sync "${target%/*}"
@@ -728,7 +743,7 @@ users_ensure_boot_records_slot() {
 # reads to hide them and omarchy-user-apps-apply enforces.
 users_write_blocked() {
   local name=$1 id tmp
-  mkdir -p "$USERS_BLOCKED_DIR" && chmod 755 "$USERS_BLOCKED_DIR" || return 1
+  users_make_public_dir "$USERS_BLOCKED_DIR" || return 1
   tmp=$(mktemp "$USERS_BLOCKED_DIR/.$name.XXXXXX") || return 1
   while read -r id; do
     [[ -z $id ]] && continue
@@ -772,7 +787,7 @@ users_themes() {
     picked+=("$collection")
   done
   (( ${#picked[@]} )) || { users_say "Pick at least one theme collection."; return 1; }
-  mkdir -p "$USERS_THEME_SETTINGS" && chmod 755 "$USERS_THEME_SETTINGS" || return 1
+  users_make_public_dir "$USERS_THEME_SETTINGS" || return 1
   tmp=$(mktemp "$USERS_THEME_SETTINGS/.$name.XXXXXX") || return 1
   printf '%s\n' "${picked[@]}" | sort -u >"$tmp" && chmod 644 "$tmp" && mv -f "$tmp" "$USERS_THEME_SETTINGS/$name" || {
     rm -f "$tmp"
@@ -794,7 +809,7 @@ users_adult_check() {
     return 1
   fi
   uid=$(id -u -- "$caller") || return 1
-  mkdir -p "$USERS_RATE_DIR" && chmod 700 "$USERS_RATE_DIR" || return 1
+  users_make_dir "$USERS_RATE_DIR" 700 || return 1
   exec {fd}>>"$USERS_RATE_DIR/adult-check-$uid.lock" && flock -x "$fd" || return 1
   users_adult_check_locked "$caller" "$password" "$uid" || status=$?
   exec {fd}>&-

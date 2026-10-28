@@ -30,6 +30,13 @@ for dir in /usr/local/share/applications /usr/share/applications /usr/share/omar
   done
 done
 
+# Two apps can share a name (two "Document Viewer"s); those say which is which.
+declare -A uses=()
+for id in "${!names[@]}"; do uses[${names[$id]}]=$(( ${uses[${names[$id]}]:-0} + 1 )); done
+for id in "${!names[@]}"; do
+  (( ${uses[${names[$id]}]} == 1 )) || names[$id]="${names[$id]} ($id)"
+done
+
 mapfile -t ids < <(for id in "${!names[@]}"; do printf '%s\t%s\n' "${names[$id]}" "$id"; done | sort -f | cut -f2)
 blocked=()
 if [[ -f /etc/omarchy/blocked-apps/$name ]]; then

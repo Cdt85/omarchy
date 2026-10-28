@@ -218,6 +218,7 @@ reset_system() {
 # Each call runs the library fresh in a subshell, as each helper run does.
 users() {
   (
+    umask 077   # as the helper runs
     export USERS_DIR=$tmp/etc/omarchy/users USERS_JOURNAL=$tmp/var/journal USERS_LOCK=$tmp/run/lock
     export USERS_SHADOW=$tmp/shadow USERS_SUDOERS_DIR=$tmp/etc/sudoers.d USERS_LIFECYCLE_DISPATCH=omarchy-lifecycle-dispatch USERS_REFUSAL_DELAY=0 USERS_SDDM_CONF=$tmp/etc/sddm.conf USERS_BLOCKED_DIR=$tmp/etc/omarchy/blocked-apps USERS_BLOCKED_DEFAULT=$ROOT/default/omarchy/child-blocked-apps USERS_APPS_APPLY=omarchy-user-apps-apply USERS_REBUILD_BOOT=fake-rebuild USERS_SCREEN_TIME_ADMIN=fake-screen-time USERS_THEME_SETTINGS=$tmp/etc/omarchy/theme-collections USERS_THEME_COLLECTIONS=$ROOT/default/omarchy/theme-collections USERS_RATE_DIR=$tmp/run/rate
     mkdir -p "$USERS_SUDOERS_DIR"
@@ -254,6 +255,8 @@ users users_map_valid || fail "the map is valid after an add"
 [[ $(cat "$tmp/etc/omarchy/blocked-apps/emma") == "$(grep -v '^#' "$ROOT/default/omarchy/child-blocked-apps" | sort -u)" ]] || fail "a new child starts with the shipped blocked apps" "$(cat "$tmp/etc/omarchy/blocked-apps/emma")"
 [[ $(stat -c %a "$tmp/etc/omarchy/blocked-apps/emma") == "644" ]] || fail "the child's session can read their blocked list"
 [[ $(cat "$tmp/apps-applied") == "1" ]] || fail "the blocked list is enforced once written"
+[[ $(stat -c %a "$tmp/etc/omarchy") == "755" && $(stat -c %a "$tmp/etc/omarchy/blocked-apps") == "755" ]] || fail "the settings a session reads sit under directories it can reach" "$(stat -c '%a %n' "$tmp/etc/omarchy" "$tmp/etc/omarchy/blocked-apps")"
+[[ $(stat -c %a "$tmp/etc/omarchy/users") == "700" ]] || fail "the slot map's directory stays root's alone"
 pass "an adult adds a child: own account, own slot, mapped, not in wheel, starting with the shipped blocked apps"
 
 expect_refused() {

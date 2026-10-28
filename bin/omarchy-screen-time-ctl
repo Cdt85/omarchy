@@ -310,7 +310,7 @@ web_set() {
     current=$(web_list | jq -r '.domains[]')
     domains=${current:-$(grep -v '^[[:space:]]*\(#\|$\)' "$web_starter" 2>/dev/null)}
   fi
-  mkdir -p "$web_dir" && chmod 755 "$web_dir" || fail internal
+  users_make_public_dir "$web_dir" || fail internal
   { [[ $enabled == true ]] && echo on || echo off; [[ -n $domains ]] && printf '%s\n' "$domains"; } >"$web_dir/.$user.tmp" &&
     chmod 644 "$web_dir/.$user.tmp" && mv -f "$web_dir/.$user.tmp" "$web_dir/$user" || fail internal
   if [[ $enabled == true ]] && ((EUID == 0)); then

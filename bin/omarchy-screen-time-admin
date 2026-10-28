@@ -87,7 +87,7 @@ cmd_on() {
   seed_config
   st_private_dir "$ST_ETC" 0700
   st_private_dir "$ST_STATE" 0700
-  systemctl enable --now "$UNIT" >/dev/null
+  systemctl enable --quiet --now "$UNIT"
   echo "screen time is on: $(systemctl is-active "$UNIT")"
   if [[ -z $(st_managed_users) ]]; then
     echo "no account is limited yet: sudo omarchy-screen-time-admin add NAME"

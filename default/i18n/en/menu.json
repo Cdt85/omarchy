@@ -38,6 +38,9 @@
   "system.lock": {
     "label": "Lock"
   },
+  "system.switch-user": {
+    "label": "Switch User"
+  },
   "system.suspend": {
     "label": "Suspend"
   },

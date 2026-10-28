@@ -35,6 +35,7 @@
   // System
   "system.screensaver": {"icon":"󱄄","label":"Screensaver","action":"omarchy-launch-screensaver force"},
   "system.lock": {"icon":"","label":"Lock","action":"omarchy-system-lock"},
+  "system.switch-user": {"icon":"","label":"Switch User","aliases":["switch-user"],"when":"(( $(getent passwd | awk -F: '$3 >= 1000 && $3 < 60000 && $7 !~ /(nologin|false)$/' | wc -l) > 1 ))","provider":"switch-users"},
   "system.suspend": {"icon":"󰒲","label":"Suspend","when":"! omarchy-toggle-enabled suspend-off && ! omarchy-sleep-disabled","action":"systemctl suspend"},
   "system.hibernate": {"icon":"󰤁","label":"Hibernate","when":"omarchy-hibernation-available && ! omarchy-sleep-disabled","action":"systemctl hibernate"},
   "system.logout": {"icon":"󰍃","label":"Logout","action":"omarchy-system logout"},

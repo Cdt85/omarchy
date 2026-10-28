@@ -356,6 +356,13 @@ Item {
       volatile: true,
       actionFor: function(value) { return "omarchy-language " + Util.shellQuote(value) }
     },
+    // Everyone else with an account, for System > Switch User.
+    "switch-users": {
+      script: "me=$(id -un); omarchy-user-list 2>/dev/null | while read -r name _; do [[ -z $name || $name == \"$me\" ]] && continue; printf '%s\\t%s\\t\\n' \"$name\" \"$name\"; done",
+      icon: "\uf007",
+      volatile: true,
+      actionFor: function(value) { return "omarchy-user-switch " + Util.shellQuote(value) }
+    },
     // People with an account; the ✓ marks you. A child sees only themselves,
     // since only their own password is theirs to change.
     "users": {

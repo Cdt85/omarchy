@@ -33,10 +33,15 @@ HISTORY_EVERY=12 # ticks between history.json rewrites, a minute at the default 
 # the actions, and whether the day changed enough to be worth writing.
 read -r -d '' TICK_JQ <<'JQ' || true
 def blocking: [$profile.blocked_periods[] | select(.enabled and covers($moment; $wd; $ywd))] | .[0];
+# Notifications carry catalog keys, translated in the account's own language
+# when sent: {key, args, count} each, a body being whole sentences in a row.
+def say($key): {key: $key};
+def say($key; $args): {key: $key, args: $args};
+def say($key; $args; $count): {key: $key, args: $args, count: $count};
 def headline($reason):
-  if $reason == "empty" then "Today's screen time is used up."
-  elif (blocking.label // "Blocked") == "Blocked" then "The screen is blocked right now."
-  else "It is \(blocking.label | ascii_downcase)." end;
+  if $reason == "empty" then say("screenTime.usedUp")
+  elif (blocking.label // "Blocked") == "Blocked" then say("screenTime.blockedNow")
+  else say("screenTime.itIs"; [blocking.label | ascii_downcase]) end;
 def together: $profile.philosophy == "together";
 def reason: if together then null elif blocking != null then "bedtime" elif (.day | day_remaining) <= 0 then "empty" else null end;
 def earn_room: ([$profile.earn.daily_cap_minutes * 60 - .day.earned_seconds, 0] | max);
@@ -52,9 +57,9 @@ def warn:
   if $t == null then . else
     .day.warned += [$t] |
     .actions += [{type: "notify", tag: "warn",
-      urgency: (if $t <= 5 then "critical" else "normal" end), title: "Screen Time",
-      body: ((if $t == 1 then "1 minute left." else "\($t) minutes left." end)
-             + (if $profile.earn.enabled and earn_room > 0 then " Earn more with math problems." else "" end))}]
+      urgency: (if $t <= 5 then "critical" else "normal" end), title: say("screenTime.title"),
+      body: ([say("screenTime.minutesLeft"; [$t]; $t)]
+             + (if $profile.earn.enabled and earn_room > 0 then [say("screenTime.earnMore")] else [] end))}]
   end;
 
 def nudge:
@@ -63,14 +68,14 @@ def nudge:
   ($profile.break_nudge_minutes) as $m |
   (if $m > 0 and (.rt.nudged | not) and .rt.stretch >= $m * 60 then
      .rt.nudged = true |
-     .actions += [{type: "notify", tag: "nudge", urgency: "normal", title: "Screen Time",
-       body: "You have been at it for \($m) minutes straight. A little break?"}]
+     .actions += [{type: "notify", tag: "nudge", urgency: "normal", title: say("screenTime.title"),
+       body: [say("screenTime.breakNudge"; [$m])]}]
    else . end) |
   ($profile.agreement_minutes) as $a |
   if $a > 0 and (.day.agreement_noted | not) and .day.spent_seconds >= $a * 60 then
     .day.agreement_noted = true |
-    .actions += [{type: "notify", tag: "agreement", urgency: "normal", title: "Screen Time",
-      body: "Your agreement is about \($a) minutes of screen time. You are at \(.day.spent_seconds / 60 | floor) minutes now."}]
+    .actions += [{type: "notify", tag: "agreement", urgency: "normal", title: say("screenTime.title"),
+      body: [say("screenTime.agreementNote"; [$a, (.day.spent_seconds / 60 | floor)])]}]
   else . end;
 
 def lock_delay:
@@ -91,7 +96,7 @@ def enforce:
     (if .rt.blocked_since == null then
        .rt.blocked_since = $now | record("blocked"; {reason: $reason}) |
        (if $profile.on_empty == "notify" then
-          .actions += [{type: "notify", tag: "empty", urgency: "critical", title: "Time's up", body: headline($reason)}]
+          .actions += [{type: "notify", tag: "empty", urgency: "critical", title: say("screenTime.timesUp"), body: [headline($reason)]}]
         else . end)
      else . end) |
     if $profile.on_empty != "lock" then .
@@ -100,8 +105,9 @@ def enforce:
     elif .rt.lock_after == null then
       lock_delay as $d |
       .rt.lock_after = $now + $d.delay |
-      .actions += [{type: "notify", tag: "empty", urgency: "critical", title: "Time's up",
-        body: "\(if $d.kind == "after_unlock" or $d.kind == "child_unlock" then "There is no time yet." else headline($reason) end) The screen locks in \($d.delay) seconds."}]
+      .actions += [{type: "notify", tag: "empty", urgency: "critical", title: say("screenTime.timesUp"),
+        body: [(if $d.kind == "after_unlock" or $d.kind == "child_unlock" then say("screenTime.noTimeYet") else headline($reason) end),
+               say("screenTime.locksIn"; [$d.delay]; $d.delay)]}]
     elif $now >= .rt.lock_after then
       # A shell that keeps not locking (frozen, killed, replaced) is the one
       # way round the lock the account has; after a few tries the session
@@ -161,7 +167,7 @@ tick_account() {
         # One notification per tag on screen: the id from last time is
         # handed back so this one replaces it instead of stacking.
         tag=$(jq -r .tag <<<"$action")
-        nid=$(st_notify "$uid" "$(jq -r .title <<<"$action")" "$(jq -r .body <<<"$action")" \
+        nid=$(st_notify "$uid" "$(jq -c .title <<<"$action")" "$(jq -c .body <<<"$action")" \
           "$(jq -r .urgency <<<"$action")" "$(jq -r --arg t "$tag" '.rt.notify_ids[$t] // ""' <<<"$result")")
         [[ -n $nid ]] && result=$(jq --arg t "$tag" --arg id "$nid" '.rt.notify_ids[$t] = $id' <<<"$result")
         ;;

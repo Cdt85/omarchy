@@ -119,3 +119,19 @@ OMARCHY_SCREEN_TIME_PATH="$told" st_tell_shell_enrolled "$(id -u)"
 OMARCHY_SCREEN_TIME_PATH="$told/none" st_tell_shell_enrolled "$(id -u)" || fail "no shell to tell is not a failure"
 rm -rf "$told"
 pass "a running shell is told when its account comes under screen time"
+
+# Notifications are translated as the account, in its own language: each
+# message is one omarchy-i18n call, counts and all, and a body's sentences are
+# joined in order.
+said=$(mktemp -d)
+printf '#!/bin/bash\nif [[ $1 == --count ]]; then echo "[$HOME|n=$2|${*:3}]"; else echo "[$HOME|$*]"; fi\n' >"$said/omarchy-i18n"
+printf '#!/bin/bash\nprintf "%%s\\n" "${@: -2}" >"%s/sent"\necho 42\n' "$said" >"$said/omarchy-notification-send"
+chmod +x "$said"/*
+id=$(OMARCHY_SCREEN_TIME_PATH="$said" st_notify "$(id -u)" '{"key":"screenTime.title"}' \
+  '[{"key":"screenTime.minutesLeft","args":[5],"count":5},{"key":"screenTime.earnMore"}]' normal "")
+home=$(st_home_of "$(id -u)")
+[[ $id == 42 && $(sed -n 1p "$said/sent") == "[$home|screenTime.title]" &&
+   $(sed -n 2p "$said/sent") == "[$home|n=5|screenTime.minutesLeft 5] [$home|screenTime.earnMore]" ]] ||
+  fail "a notification is translated message by message as the account" "$(cat "$said/sent" 2>/dev/null)"
+rm -rf "$said"
+pass "screen time notifications are translated in the account's own context, counts included"

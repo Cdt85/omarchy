@@ -267,6 +267,23 @@
   "reset.stopUsing": "Do not keep using this machine — changes made now will be lost.",
   "reset.typeToContinue": "Type '%1' to continue",
   "reset.willErase": "This will permanently erase:",
+  "screenTime.agreementNote": "Your agreement is about %1 minutes of screen time. You are at %2 minutes now.",
+  "screenTime.blockedNow": "The screen is blocked right now.",
+  "screenTime.breakNudge": "You have been at it for %1 minutes straight. A little break?",
+  "screenTime.earnMore": "Earn more with math problems.",
+  "screenTime.itIs": "It is %1.",
+  "screenTime.locksIn": {
+    "one": "The screen locks in %1 second.",
+    "other": "The screen locks in %1 seconds."
+  },
+  "screenTime.minutesLeft": {
+    "one": "%1 minute left.",
+    "other": "%1 minutes left."
+  },
+  "screenTime.noTimeYet": "There is no time yet.",
+  "screenTime.timesUp": "Time's up",
+  "screenTime.title": "Screen Time",
+  "screenTime.usedUp": "Today's screen time is used up.",
   "screensaver.disabled": "Screensaver disabled",
   "screensaver.enabled": "Screensaver enabled",
   "setupForm.confirmPlaceholder": "Must match the password you just typed",

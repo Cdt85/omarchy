@@ -63,7 +63,8 @@ export OMARCHY_SCREEN_TIME_TERMINATE_COMMAND="$fake/terminate-stub"
 export OMARCHY_SCREEN_TIME_PATH="$fake:/usr/bin:/bin"
 source omarchy-screen-time-lib
 
-# A one-minute budget every day, warn at one minute, three-second grace.
+# A one-minute budget every day, warn at one minute, three-second grace, and
+# no bedtime, so the run does not depend on the hour.
 st_jq -n --arg me "$me" '
   default_config | .active_profile = "kids" |
   .profiles = {kids: (default_profile
@@ -71,7 +72,8 @@ st_jq -n --arg me "$me" '
     | .budget_minutes = {mon:1,tue:1,wed:1,thu:1,fri:1,sat:1,sun:1}
     | .warn_minutes = [1]
     | .grace_seconds = 3
-    | .relock_seconds = 3)} |
+    | .relock_seconds = 3
+    | .blocked_periods = [])} |
   .users = {($me): {profile: "kids"}}' | st_save_config
 
 status_field() { jq -r "$1" "$OMARCHY_SCREEN_TIME_RUN/$my_uid/status.json"; }

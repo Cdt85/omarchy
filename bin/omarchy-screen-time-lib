@@ -480,14 +480,32 @@ st_session_info() {
   echo "$present $is_active $locked $chosen"
 }
 
+st_say() {
+  # $1 uid, $2 one message as JSON, {key, args, count}: its text in the
+  # account's own language, which omarchy-i18n reads from their home.
+  local uid=$1 message=$2 count
+  local -a args=()
+  mapfile -t args < <(jq -r '.args // [] | .[] | tostring' <<<"$message")
+  count=$(jq -r '.count // empty' <<<"$message")
+  if [[ -n $count ]]; then
+    st_as_user "$uid" omarchy-i18n --count "$count" "$(jq -r .key <<<"$message")" "${args[@]}"
+  else
+    st_as_user "$uid" omarchy-i18n "$(jq -r .key <<<"$message")" "${args[@]}"
+  fi
+}
+
 st_notify() {
-  # $1 uid, $2 title, $3 body, $4 urgency, $5 the id of the notification to
+  # $1 uid, $2 title and $3 body as messages (the body a JSON list of them,
+  # whole sentences in a row), $4 urgency, $5 the id of the notification to
   # replace (empty for a new one). Prints the id the server gave, so the
   # caller can hand it back next time: one warning on screen, not a stack.
-  local uid=$1 title=$2 body=$3 urgency=${4:-normal} replaces=${5:-}
+  local uid=$1 title=$2 body=$3 urgency=${4:-normal} replaces=${5:-} message text=""
   local args=(omarchy-notification-send -p --app-name "$ST_APP_NAME" -u "$urgency")
   [[ $replaces =~ ^[0-9]+$ ]] && args+=(-r "$replaces")
-  st_as_user "$uid" "${args[@]}" "$title" "$body" 2>/dev/null | tr -dc '0-9' || true
+  while IFS= read -r message; do
+    text+="${text:+ }$(st_say "$uid" "$message")"
+  done < <(jq -c '.[]' <<<"$body")
+  st_as_user "$uid" "${args[@]}" "$(st_say "$uid" "$title")" "$text" 2>/dev/null | tr -dc '0-9' || true
 }
 
 st_lock_session() {

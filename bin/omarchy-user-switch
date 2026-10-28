@@ -25,6 +25,19 @@ if ! printf '%s\n' "${others[@]}" | grep -qx -- "$name"; then
   exit 1
 fi
 
+sessions=$(loginctl list-sessions --json=short)
+session=$(jq -r --arg user "$name" '.[] | select(.user == $user and .seat == "seat0" and .class == "user") | .session' <<<"$sessions" | head -1)
+
+# SDDM 0.21 starts a greeter for someone not signed in on the first console,
+# and when a desktop holds that console, as an automatic login's does, the
+# greeter fails there and leaves this desktop dark with no way back. Logging
+# out frees it, so that is offered instead.
+if [[ -z $session ]] && jq -e '.[] | select(.tty == "tty1")' <<<"$sessions" >/dev/null; then
+  omarchy-notification-send -u critical -g 󰍃 "$(omarchy-i18n users.logOutToSwitch "$name")" "$(omarchy-i18n users.logOutToSwitchBody "$name")" \
+    --exec "omarchy-system logout"
+  exit 0
+fi
+
 # Locked before anything switches, so this desktop is never left open behind
 # the other one.
 omarchy-system-lock
@@ -34,17 +47,8 @@ for (( i = 0; i < 50; i++ )); do
 done
 omarchy-hyprland-session-locked || { echo "Could not lock this desktop, so nothing was switched." >&2; exit 1; }
 
-session=$(loginctl list-sessions --json=short | jq -r --arg user "$name" '.[] | select(.user == $user and .seat == "seat0" and .class == "user") | .session' | head -1)
 if [[ -n $session ]]; then
   loginctl activate "$session"
 else
-  # SDDM puts a Wayland greeter on the current VT when it judges that VT free,
-  # and it judges the one this desktop is on free, so the greeter fails on it.
-  # Move to a VT no session holds first, which the active session may do.
-  used=$(loginctl list-sessions --json=short | jq -r '.[].tty // empty')
-  for (( vt = 2; vt <= 12; vt++ )); do
-    grep -qx "tty$vt" <<<"$used" || break
-  done
-  busctl call org.freedesktop.login1 /org/freedesktop/login1/seat/seat0 org.freedesktop.login1.Seat SwitchTo u "$vt"
   busctl call org.freedesktop.DisplayManager /org/freedesktop/DisplayManager/Seat0 org.freedesktop.DisplayManager.Seat SwitchToGreeter
 fi

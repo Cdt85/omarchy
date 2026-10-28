@@ -387,6 +387,8 @@
   "users.delete": "Delete",
   "users.deleteHome": "Also delete %1's files?",
   "users.deleted": "Deleted %1.",
+  "users.logOutToSwitch": "Log out to let %1 sign in",
+  "users.logOutToSwitchBody": "This desktop holds the first screen, where the login screen has to appear. Log out, and %1 can sign in there.",
   "users.mismatch": "The passwords didn't match.",
   "users.name": "Name",
   "users.namePlaceholder": "Lowercase, like emma",

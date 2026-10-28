@@ -31,6 +31,7 @@ fi
 : "${USERS_WEB_APPLY:=/usr/bin/omarchy-web-allowlist-apply}"
 : "${USERS_THEME_SETTINGS:=/etc/omarchy/theme-collections}"
 : "${USERS_THEME_COLLECTIONS:=/usr/share/omarchy/default/omarchy/theme-collections}"
+: "${USERS_FAILLOCK:=faillock}"
 
 USERS_SLOT_MAP=$USERS_DIR/slots
 USERS_ROOT_HOLDER=$USERS_DIR/root
@@ -104,6 +105,14 @@ users_password_owner() {
     fi
   done
   return 1
+}
+
+# Whether the account has failed logins on record; a locked account always
+# does. Counts as yes when faillock cannot say.
+users_has_failed_logins() {
+  local tally
+  tally=$("$USERS_FAILLOCK" --user "$1" 2>/dev/null) || return 0
+  [[ -n $(awk 'NR > 2 && NF' <<<"$tally") ]]
 }
 
 # Changes whenever the account's shadow password does, without holding it.

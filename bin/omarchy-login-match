@@ -39,6 +39,22 @@ users_valid_name "$user" || exit 1
 password=""
 IFS= read -r -d '' password || [[ -n $password ]] || exit 1
 
-users_password_matches "$password" "$user" && exit 1
-owner=$(users_password_owner "$password") || exit 1
-[[ $owner != "$user" ]]
+# A stalled lookup must not hold every login: past the deadline this ends
+# nonzero, which leaves the attempt to the usual stack.
+( sleep 10; pkill -KILL -P $$; kill -KILL $$ ) 2>/dev/null &
+watchdog=$!
+
+# Only an owner with no failed logins on record ends the attempt early. A
+# locked owner's password then takes the same slow refusal as any wrong one,
+# so a fast refusal never tells a guesser what a lockout is hiding.
+match() {
+  local owner
+  users_password_matches "$password" "$user" && return 1
+  owner=$(users_password_owner "$password") || return 1
+  [[ $owner != "$user" ]] && ! users_has_failed_logins "$owner"
+}
+
+match
+status=$?
+kill "$watchdog" 2>/dev/null
+exit "$status"

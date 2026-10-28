@@ -662,3 +662,20 @@ users users_add dhh child emma kidpass1 ownerpw 2>/dev/null
 [[ $(users users_password_owner kidpass1) == emma && $(users users_password_owner ownerpw) == dhh ]] || fail "each password names its own account"
 ! users users_password_owner nobodys1 >/dev/null || fail "a password that is nobody's names no account"
 pass "a password names the one account it belongs to, and nobody's names none"
+
+# The login screen only ends an attempt early for an owner with no failed
+# logins on record, so a lockout never hides behind a faster refusal.
+cat >"$tmp/bin/fake-faillock" <<'SH'
+#!/bin/bash
+[[ ${TEST_FAILLOCK:-} == broken ]] && exit 1
+printf '%s:\nWhen                Type  Source  Valid\n' "$2"
+[[ ${TEST_FAILLOCK:-} == failed ]] && printf '2026-10-28 15:07:52 SVC   sddm    V\n'
+true
+SH
+chmod +x "$tmp/bin/fake-faillock"
+export USERS_FAILLOCK=fake-faillock
+! users users_has_failed_logins dhh || fail "an account with an empty tally has no failed logins"
+TEST_FAILLOCK=failed users users_has_failed_logins dhh || fail "a recorded failure counts"
+TEST_FAILLOCK=broken users users_has_failed_logins dhh || fail "a tally that cannot be read counts as failures"
+unset USERS_FAILLOCK
+pass "only an owner with a clean failed-login tally is matched early, and an unreadable tally is not clean"

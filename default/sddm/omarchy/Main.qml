@@ -15,8 +15,12 @@ Rectangle {
   property var candidates: []
   property int attempt: 0
   property string pending: ""
-  // SDDM sends LoginFailed twice for one failure; only the first answers.
   property bool awaiting: false
+  property int resends: 0
+  // SDDM sends LoginFailed twice for one failure. The second is consumed as
+  // such even if it arrives after the next account was sent, so it is never
+  // taken for that account's answer.
+  property int duplicates: 0
 
   function login() {
     var names = [userModel.lastUser]
@@ -30,7 +34,16 @@ Rectangle {
       return
     pending = password.text
     attempt = 0
+    resends = 0
     send()
+  }
+
+  function fail() {
+    pending = ""
+    awaiting = false
+    password.text = ""
+    loginFailed = true
+    password.focus = true
   }
 
   function send() {
@@ -59,19 +72,23 @@ Rectangle {
   Connections {
     target: sddm
     function onLoginFailed() {
+      if (root.duplicates > 0) {
+        root.duplicates--
+        return
+      }
+      root.duplicates = 1
+      pairWindow.restart()
       if (!root.awaiting)
         return
       root.awaiting = false
       unanswered.stop()
       if (root.pending !== "" && root.attempt + 1 < root.candidates.length) {
         root.attempt++
+        root.resends = 0
         nextAttempt.start()
         return
       }
-      root.pending = ""
-      password.text = ""
-      root.loginFailed = true
-      password.focus = true
+      root.fail()
     }
     function onLoginSucceeded() {
       root.awaiting = false
@@ -84,7 +101,8 @@ Rectangle {
   // SDDM reports a failure before its helper has exited, and silently drops a
   // login sent before then, so the next account waits a moment; an attempt
   // still unanswered after pam_unix's failure delay was dropped, and is sent
-  // again. One sent while the first is still running is dropped the same way.
+  // again, a few times at most. One sent while the first is still running is
+  // dropped the same way.
   Timer {
     id: nextAttempt
     interval: 300
@@ -94,7 +112,20 @@ Rectangle {
   Timer {
     id: unanswered
     interval: 5000
-    onTriggered: if (root.pending !== "") root.send()
+    onTriggered: {
+      if (root.pending === "")
+        return
+      if (root.resends >= 3)
+        return root.fail()
+      root.resends++
+      root.send()
+    }
+  }
+
+  Timer {
+    id: pairWindow
+    interval: 1000
+    onTriggered: root.duplicates = 0
   }
 
   Column {
@@ -169,7 +200,7 @@ Rectangle {
           onTextChanged: root.loginFailed = false
 
           Keys.onPressed: function(event) {
-            if ((event.key === Qt.Key_Return || event.key === Qt.Key_Enter) && root.pending === "") {
+            if ((event.key === Qt.Key_Return || event.key === Qt.Key_Enter) && root.pending === "" && !root.awaiting) {
               root.login()
               event.accepted = true
             }

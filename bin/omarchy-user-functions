@@ -26,6 +26,7 @@ fi
 : "${USERS_BLOCKED_DEFAULT:=/usr/share/omarchy/default/omarchy/child-blocked-apps}"
 : "${USERS_APPS_APPLY:=/usr/bin/omarchy-user-apps-apply}"
 : "${USERS_REBUILD_BOOT:=limine-mkinitcpio}"
+: "${USERS_SCREEN_TIME_ADMIN:=/usr/bin/omarchy-screen-time-admin}"
 : "${USERS_THEME_SETTINGS:=/etc/omarchy/theme-collections}"
 : "${USERS_THEME_COLLECTIONS:=/usr/share/omarchy/default/omarchy/theme-collections}"
 
@@ -520,6 +521,12 @@ users_add() {
   users_journal_put phase shadow || return 1
   users_finish || return 1
   users_ensure_boot_records_slot
+  # A child is under screen time from the start, with its default limits, for
+  # the grown-ups to change from the screen time panel.
+  if [[ $role == "child" ]]; then
+    "$USERS_SCREEN_TIME_ADMIN" on >/dev/null && "$USERS_SCREEN_TIME_ADMIN" add "$name" >/dev/null ||
+      users_say "Added $name, but could not put them under screen time."
+  fi
   # A child starts with the shipped list of apps a child neither sees nor
   # runs, for the grown-ups to change under Setup > Users.
   if [[ $role == "child" && -f $USERS_BLOCKED_DEFAULT ]]; then
@@ -677,6 +684,7 @@ users_finish() {
         rm -f "$USERS_BLOCKED_DIR/$user" && "$USERS_APPS_APPLY" || return 1
       fi
       rm -f "$USERS_THEME_SETTINGS/$user" || return 1
+      "$USERS_SCREEN_TIME_ADMIN" remove "$user" >/dev/null 2>&1 || true
       uid=$(users_journal_get uid)
       if [[ $uid =~ ^[0-9]+$ ]]; then
         rm -f "$USERS_SUDOERS_DIR/99-omarchy-nopasswd-$uid" "$USERS_SUDOERS_DIR/99-omarchy-permanent-nopasswd-$uid" || return 1

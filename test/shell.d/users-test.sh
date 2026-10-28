@@ -180,6 +180,11 @@ case $1 in
 esac
 SH
 
+fake fake-rebuild <<'SH'
+#!/bin/bash
+echo rebuilt >>"$TEST_TMP/rebuilt"
+SH
+
 fake omarchy-user-apps-apply <<'SH'
 #!/bin/bash
 echo $(( $(cat "$TEST_TMP/apps-applied" 2>/dev/null || echo 0) + 1 )) >"$TEST_TMP/apps-applied"
@@ -189,7 +194,7 @@ export PATH="$tmp/bin:$PATH"
 
 reset_system() {
   rm -rf "$tmp/etc" "$tmp/var"
-  rm -f "$tmp/homes-removed" "$tmp/loginctl" "$tmp/usermod" "$tmp/apps-applied"
+  rm -f "$tmp/homes-removed" "$tmp/loginctl" "$tmp/usermod" "$tmp/apps-applied" "$tmp/rebuilt"
   printf 'root:x:0:0::/root:/bin/bash\nnobody:x:65534:65534::/:/usr/bin/nologin\ndhh:x:1000:1000::/home/dhh:/bin/bash\n' >"$tmp/passwd"
   printf 'root:x:0:\nwheel:x:998:dhh\ndhh:x:1000:\n' >"$tmp/group"
   printf 'root:!:20000::::::\nnobody:!:20000::::::\ndhh:!:20000::::::\n' >"$tmp/shadow"
@@ -209,7 +214,7 @@ reset_system() {
 users() {
   (
     export USERS_DIR=$tmp/etc/omarchy/users USERS_JOURNAL=$tmp/var/journal USERS_LOCK=$tmp/run/lock
-    export USERS_SHADOW=$tmp/shadow USERS_SUDOERS_DIR=$tmp/etc/sudoers.d USERS_LIFECYCLE_DISPATCH=omarchy-lifecycle-dispatch USERS_REFUSAL_DELAY=0 USERS_SDDM_CONF=$tmp/etc/sddm.conf USERS_BLOCKED_DIR=$tmp/etc/omarchy/blocked-apps USERS_BLOCKED_DEFAULT=$ROOT/default/omarchy/child-blocked-apps USERS_APPS_APPLY=omarchy-user-apps-apply USERS_THEME_SETTINGS=$tmp/etc/omarchy/theme-collections USERS_THEME_COLLECTIONS=$ROOT/default/omarchy/theme-collections USERS_RATE_DIR=$tmp/run/rate
+    export USERS_SHADOW=$tmp/shadow USERS_SUDOERS_DIR=$tmp/etc/sudoers.d USERS_LIFECYCLE_DISPATCH=omarchy-lifecycle-dispatch USERS_REFUSAL_DELAY=0 USERS_SDDM_CONF=$tmp/etc/sddm.conf USERS_BLOCKED_DIR=$tmp/etc/omarchy/blocked-apps USERS_BLOCKED_DEFAULT=$ROOT/default/omarchy/child-blocked-apps USERS_APPS_APPLY=omarchy-user-apps-apply USERS_REBUILD_BOOT=fake-rebuild USERS_THEME_SETTINGS=$tmp/etc/omarchy/theme-collections USERS_THEME_COLLECTIONS=$ROOT/default/omarchy/theme-collections USERS_RATE_DIR=$tmp/run/rate
     mkdir -p "$USERS_SUDOERS_DIR"
     source "$ROOT/bin/omarchy-user-functions"
     users_load_drive
@@ -571,3 +576,14 @@ printf '' | users users_themes dhh emma ownerpw 2>/dev/null && fail "at least on
 users users_delete dhh emma ownerpw yes 2>/dev/null
 [[ ! -e $tmp/etc/omarchy/theme-collections/emma ]] || fail "a deleted person's collections go with them"
 pass "only an adult picks someone's theme collections, from those shipped, and they go with the person"
+
+# --- Boot image ---
+
+reset_system
+users users_add dhh child emma kidpass ownerpw 2>/dev/null
+users users_add dhh adult bob bobpass1 ownerpw 2>/dev/null
+[[ $(cat "$tmp/rebuilt") == "rebuilt" ]] || fail "the boot image is rebuilt once, the first time someone is added" "$(cat "$tmp/rebuilt" 2>/dev/null)"
+reset_system unencrypted
+users users_add dhh child emma kidpass ownerpw 2>/dev/null
+[[ ! -e $tmp/rebuilt ]] || fail "an unencrypted machine has no unlock to record"
+pass "the boot image is rebuilt once on an encrypted machine when the first person is added, never on an unencrypted one"

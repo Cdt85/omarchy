@@ -25,6 +25,7 @@ fi
 : "${USERS_BLOCKED_DIR:=/etc/omarchy/blocked-apps}"
 : "${USERS_BLOCKED_DEFAULT:=/usr/share/omarchy/default/omarchy/child-blocked-apps}"
 : "${USERS_APPS_APPLY:=/usr/bin/omarchy-user-apps-apply}"
+: "${USERS_REBUILD_BOOT:=limine-mkinitcpio}"
 : "${USERS_THEME_SETTINGS:=/etc/omarchy/theme-collections}"
 : "${USERS_THEME_COLLECTIONS:=/usr/share/omarchy/default/omarchy/theme-collections}"
 
@@ -518,6 +519,7 @@ users_add() {
   users_set_passwords "$password" "$name" || { users_finish; return 1; }
   users_journal_put phase shadow || return 1
   users_finish || return 1
+  users_ensure_boot_records_slot
   # A child starts with the shipped list of apps a child neither sees nor
   # runs, for the grown-ups to change under Setup > Users.
   if [[ $role == "child" && -f $USERS_BLOCKED_DEFAULT ]]; then
@@ -693,6 +695,23 @@ users_finish() {
       return 1
       ;;
   esac
+}
+
+# --- Boot ------------------------------------------------------------------------
+
+# The boot image picks up the hook that records which key slot unlocked the
+# disk once Setup > Users exists (00-omarchy-hooks.conf), so it is rebuilt the
+# first time someone is added to an encrypted machine. Until it is, every boot
+# with more than one person shows the login screen, which is safe.
+users_ensure_boot_records_slot() {
+  local marker=$USERS_DIR/boot-records-slot
+  users_encrypted && [[ ! -f $marker ]] || return 0
+  users_say "Updating the boot image so the computer knows whose password unlocked it..."
+  if "$USERS_REBUILD_BOOT" >/dev/null 2>&1; then
+    : | users_write_atomically "$marker"
+  else
+    users_say "Could not update the boot image; until it is, the login screen asks who is signing in."
+  fi
 }
 
 # --- Blocked apps ----------------------------------------------------------------

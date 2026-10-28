@@ -1,0 +1,31 @@
+#!/bin/bash
+
+# omarchy:summary=Delete a person's account from this computer
+# omarchy:args=NAME [--delete-home]
+# omarchy:requires-sudo=true
+
+set -euo pipefail
+set +x
+
+source "$OMARCHY_PATH/install/helpers/user-prompts.sh"
+user_refuse_root
+
+name=${1:-}
+home_flag=()
+if [[ -z $name || $# -gt 2 || ( $# -eq 2 && $2 != "--delete-home" ) ]]; then
+  echo "Usage: omarchy-user-delete NAME [--delete-home]" >&2
+  exit 1
+fi
+
+if (( $# == 2 )); then
+  home_flag=(--delete-home)
+else
+  gum confirm "$(omarchy-i18n users.confirmDelete "$name")" || exit 1
+  if gum confirm --default=false "$(omarchy-i18n users.deleteHome "$name")"; then
+    home_flag=(--delete-home)
+  fi
+fi
+
+mine=$(user_prompt_own_password "$(omarchy-i18n users.yourPassword)") || exit 1
+printf '%s\n' "$mine" | sudo omarchy-user-helper delete "$name" "${home_flag[@]}"
+echo "$(omarchy-i18n users.deleted "$name")"

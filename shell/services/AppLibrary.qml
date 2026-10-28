@@ -16,6 +16,14 @@ Item {
   property var configuredHiddenEntryIds: ({})
   property var desktopHiddenEntryIds: ({})
 
+  // A child's account (omarchy-child) sees only the apps a grown-up allowed:
+  // their list in /etc/omarchy/child-apps, or the shipped one until they keep
+  // their own. It curates the launcher; it does not stop anything running.
+  property bool childAccount: false
+  property var childAllowedIds: ({})
+  property string systemChildApps: ""
+  property string defaultChildApps: ""
+
   // Maps an icon name to a file on disk (e.g. "omacut" -> ".../apps/omacut.svg").
   // Used as a fallback for icons that Qt's themed lookup misses because they were
   // installed after this process started (its icon cache never re-scans). Refreshed
@@ -46,7 +54,21 @@ Item {
 
   function isHiddenEntry(entry) {
     var id = String((entry && entry.id) || "")
+    if (root.childAccount && root.childAllowedIds[id] !== true) return true
     return root.configuredHiddenEntryIds[id] === true || root.desktopHiddenEntryIds[id] === true
+  }
+
+  function loadChildAllowed() {
+    var source = root.systemChildApps.length > 0 ? root.systemChildApps : root.defaultChildApps
+    var next = ({})
+    var lines = source.split(/\n/)
+    for (var i = 0; i < lines.length; i++) {
+      var line = lines[i].trim()
+      if (line.length === 0 || line.charAt(0) === "#") continue
+      next[root.normalizeDesktopId(line)] = true
+    }
+    root.childAllowedIds = next
+    root.appsChanged()
   }
 
   function sortedEntries(query) {
@@ -230,6 +252,32 @@ Item {
     id: iconIndexDebounce
     interval: 750
     onTriggered: if (!iconIndexScan.running) iconIndexScan.running = true
+  }
+
+  Process {
+    command: ["id", "-nG"]
+    running: true
+    stdout: StdioCollector {
+      onStreamFinished: {
+        root.childAccount = (" " + String(text || "").trim() + " ").indexOf(" omarchy-child ") !== -1
+        root.appsChanged()
+      }
+    }
+  }
+
+  FileView {
+    path: "/etc/omarchy/child-apps"
+    watchChanges: true
+    printErrors: false
+    onLoaded: { root.systemChildApps = text(); root.loadChildAllowed() }
+    onFileChanged: reload()
+    onLoadFailed: { root.systemChildApps = ""; root.loadChildAllowed() }
+  }
+
+  FileView {
+    path: root.omarchyPath + "/default/omarchy/child-apps"
+    printErrors: false
+    onLoaded: { root.defaultChildApps = text(); root.loadChildAllowed() }
   }
 
   FileView {

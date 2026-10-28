@@ -100,6 +100,14 @@ While the journal holds an unfinished change, boot shows the login screen and th
 
 Root's password is the installer owner's today. The helper records root's holder in `/etc/omarchy/users/root` (the installer owner, on the first `omarchy user add`). Change password for the holder updates root's password in the same journaled step. Deleting the holder transfers root to the adult doing the deleting, whose password the flow already asks for, so root never keeps a deleted person's password. With only children left this cannot happen: the last adult cannot be deleted.
 
+## Children
+
+A child is an account in `omarchy-child`, and three things follow from that group, each read in the child's own session:
+
+- **Kids themes.** `default/omarchy/child-themes` names #12488's collection. A child's theme picker (`omarchy-theme-switcher`'s rows) holds only the ones installed, or every theme while none is, and first login (`install/user/first-run/child.sh`) sets the first one installed. The themes themselves land with #12488.
+- **A limited app selection.** A child's launcher shows only the desktop ids in `/etc/omarchy/child-apps`, which the first child's creation seeds from `default/omarchy/child-apps` and adults keep under _Setup > Users > Child Apps_. Everything else stays installed and hidden. This curates what a child sees; it is not a lock on what can run, which needs per-program enforcement and is a later step.
+- **No Install or Remove.** Those menus are hidden in a child's session, and the git identity prompt at first login is skipped.
+
 ## What else multiple logins need
 
 From #16100, without its disk and login-screen model:

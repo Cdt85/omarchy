@@ -21,6 +21,8 @@ fi
 : "${USERS_SDDM_CONF:=/etc/sddm.conf}"
 : "${USERS_LIFECYCLE_DISPATCH:=/usr/bin/omarchy-lifecycle-dispatch}"
 : "${USERS_REFUSAL_DELAY:=3}"
+: "${USERS_CHILD_APPS:=/etc/omarchy/child-apps}"
+: "${USERS_CHILD_APPS_DEFAULT:=/usr/share/omarchy/default/omarchy/child-apps}"
 
 USERS_SLOT_MAP=$USERS_DIR/slots
 USERS_ROOT_HOLDER=$USERS_DIR/root
@@ -499,6 +501,11 @@ users_add() {
   users_adopt_root_holder "$caller" "$caller_password" || return 1
   users_ensure_wheel_grant || return 1
   getent group "$groups" >/dev/null || groupadd -r "$groups" || return 1
+  # The first child gets the list of apps a child's launcher shows, for the
+  # grown-ups to keep under Setup > Users > Child Apps. Every session reads it.
+  if [[ $role == "child" && ! -f $USERS_CHILD_APPS && -f $USERS_CHILD_APPS_DEFAULT ]]; then
+    install -Dm644 "$USERS_CHILD_APPS_DEFAULT" "$USERS_CHILD_APPS" || return 1
+  fi
 
   users_journal_put op add user "$name" uuid "$USERS_UUID" slot "$slot" phase account || return 1
   useradd -m -G "$groups" -s /bin/bash "$name" || { users_finish; return 1; }

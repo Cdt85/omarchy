@@ -204,7 +204,7 @@ reset_system() {
 users() {
   (
     export USERS_DIR=$tmp/etc/omarchy/users USERS_JOURNAL=$tmp/var/journal USERS_LOCK=$tmp/run/lock
-    export USERS_SHADOW=$tmp/shadow USERS_SUDOERS_DIR=$tmp/etc/sudoers.d USERS_LIFECYCLE_DISPATCH=omarchy-lifecycle-dispatch USERS_REFUSAL_DELAY=0 USERS_SDDM_CONF=$tmp/etc/sddm.conf
+    export USERS_SHADOW=$tmp/shadow USERS_SUDOERS_DIR=$tmp/etc/sudoers.d USERS_LIFECYCLE_DISPATCH=omarchy-lifecycle-dispatch USERS_REFUSAL_DELAY=0 USERS_SDDM_CONF=$tmp/etc/sddm.conf USERS_CHILD_APPS=$tmp/etc/omarchy/child-apps USERS_CHILD_APPS_DEFAULT=$ROOT/default/omarchy/child-apps
     mkdir -p "$USERS_SUDOERS_DIR"
     source "$ROOT/bin/omarchy-user-functions"
     users_load_drive
@@ -236,7 +236,9 @@ opens kidpass 1 || fail "the child's password opens its own slot" "$(cat "$tmp/s
 [[ ! -e $tmp/var/journal ]] || fail "a finished add leaves no journal"
 users users_map_valid || fail "the map is valid after an add"
 [[ $(users users_list) == $'dhh adult yes\nemma child yes' ]] || fail "list names each account, its role and whether it is in sync" "$(users users_list)"
-pass "an adult adds a child: own account, own slot, mapped, not in wheel"
+cmp -s "$tmp/etc/omarchy/child-apps" "$ROOT/default/omarchy/child-apps" || fail "the first child seeds the app list grown-ups keep"
+[[ $(stat -c %a "$tmp/etc/omarchy/child-apps") == "644" ]] || fail "every session can read the child app list"
+pass "an adult adds a child: own account, own slot, mapped, not in wheel, with the app list seeded"
 
 expect_refused() {
   local description=$1 message=$2

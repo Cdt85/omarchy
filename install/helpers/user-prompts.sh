@@ -35,9 +35,13 @@ user_prompt_own_password() {
   printf '%s' "$password"
 }
 
-user_refuse_root() {
+# Refuses root, and revokes the sudo timestamp the commands prime on the way
+# out, so the password typed for one change authorises nothing after it.
+user_start() {
   if (( EUID == 0 )); then
     echo "Run this as yourself; it asks for sudo itself." >&2
     exit 1
   fi
+  source "$OMARCHY_PATH/bin/omarchy-security-functions"
+  omarchy_security_install_sudo_cleanup_traps
 }

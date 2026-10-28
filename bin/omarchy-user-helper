@@ -29,6 +29,8 @@ set +x
 export PATH=/usr/local/sbin:/usr/local/bin:/usr/bin
 umask 077
 
+# The library's paths are root's alone; nothing the caller exports may move them.
+unset "${!USERS_@}"
 source "${security_entrypoint%/*}/omarchy-user-functions" || exit 126
 
 usage() {

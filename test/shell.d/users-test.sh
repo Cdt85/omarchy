@@ -86,12 +86,23 @@ SH
 fake chpasswd <<'SH'
 #!/bin/bash
 [[ -n ${TEST_FAIL_CHPASSWD:-} ]] && exit 1
-IFS= read -r line
-user=${line%%:*}
-password=${line#*:}
-hash=$(printf '%s' "$password" | perl -e 'local $/; my $p = <STDIN>; my @c = ("a".."z"); my $s = join "", map { $c[rand @c] } 1..8; print crypt($p, "\$6\$$s\$")')
-awk -F: -v OFS=: -v u="$user" -v h="$hash" '$1 == u { $2 = h } { print }' "$TEST_TMP/shadow" >"$TEST_TMP/shadow.new"
-mv "$TEST_TMP/shadow.new" "$TEST_TMP/shadow"
+while IFS= read -r line; do
+  user=${line%%:*}
+  password=${line#*:}
+  hash=$(printf '%s' "$password" | perl -e 'local $/; my $p = <STDIN>; my @c = ("a".."z"); my $s = join "", map { $c[rand @c] } 1..8; print crypt($p, "\$6\$$s\$")')
+  awk -F: -v OFS=: -v u="$user" -v h="$hash" '$1 == u { $2 = h } { print }' "$TEST_TMP/shadow" >"$TEST_TMP/shadow.new"
+  mv "$TEST_TMP/shadow.new" "$TEST_TMP/shadow"
+done
+SH
+
+fake usermod <<'SH'
+#!/bin/bash
+echo "$*" >>"$TEST_TMP/usermod"
+SH
+
+fake pkill <<'SH'
+#!/bin/bash
+exit 1
 SH
 
 fake loginctl <<'SH'
@@ -125,12 +136,22 @@ case $1 in
   luksUUID) echo "uuid-root" ;;
   isLuks) exit 0 ;;
   luksDump)
+    [[ -n ${TEST_FAIL_DUMP:-} ]] && exit 1
     echo "Keyslots:"
     cut -f1 "$slots" | sort -n | sed 's/.*/  &: luks2/'
     echo "Tokens:"
     ;;
   open)
     password=$(cat)
+    only=""
+    args=("$@")
+    for (( i = 0; i < ${#args[@]}; i++ )); do
+      [[ ${args[i]} == "--key-slot" ]] && only=${args[i+1]}
+    done
+    if [[ -n $only ]]; then
+      [[ $(awk -F'\t' -v s="$only" '$1 == s { print $2 }' "$slots") == "$password" ]] || exit 2
+      exit 0
+    fi
     slot=$(slot_for "$password")
     [[ -n $slot ]] || { echo "No key available with this passphrase."; exit 2; }
     echo "Key slot $slot unlocked."
@@ -140,13 +161,15 @@ case $1 in
     args=("$@")
     for (( i = 0; i < ${#args[@]}; i++ )); do
       [[ ${args[i]} == "--key-file" ]] && current=$(cat "${args[i+1]}")
+      [[ ${args[i]} == "--key-slot" ]] && slot=${args[i+1]}
     done
     new=$(cat "${args[-1]}")
     [[ -n $(slot_for "$current") ]] || exit 2
-    for (( slot = 0; slot < 32; slot++ )); do
-      cut -f1 "$slots" | grep -qx "$slot" || break
-    done
+    [[ -n $slot ]] || exit 98
+    ! cut -f1 "$slots" | grep -qx "$slot" || exit 1
     printf '%s\t%s\n' "$slot" "$new" >>"$slots"
+    [[ -n ${TEST_CRASH_AFTER_ADDKEY:-} ]] && exit 1
+    true
     ;;
   luksKillSlot)
     slot=${!#}
@@ -161,7 +184,7 @@ export PATH="$tmp/bin:$PATH"
 
 reset_system() {
   rm -rf "$tmp/etc" "$tmp/var"
-  rm -f "$tmp/homes-removed" "$tmp/loginctl"
+  rm -f "$tmp/homes-removed" "$tmp/loginctl" "$tmp/usermod"
   printf 'root:x:0:0::/root:/bin/bash\nnobody:x:65534:65534::/:/usr/bin/nologin\ndhh:x:1000:1000::/home/dhh:/bin/bash\n' >"$tmp/passwd"
   printf 'root:x:0:\nwheel:x:998:dhh\ndhh:x:1000:\n' >"$tmp/group"
   printf 'root:!:20000::::::\nnobody:!:20000::::::\ndhh:!:20000::::::\n' >"$tmp/shadow"
@@ -181,7 +204,7 @@ reset_system() {
 users() {
   (
     export USERS_DIR=$tmp/etc/omarchy/users USERS_JOURNAL=$tmp/var/journal USERS_LOCK=$tmp/run/lock
-    export USERS_SHADOW=$tmp/shadow USERS_SUDOERS_DIR=$tmp/etc/sudoers.d USERS_LIFECYCLE_DISPATCH=omarchy-lifecycle-dispatch USERS_REFUSAL_DELAY=0
+    export USERS_SHADOW=$tmp/shadow USERS_SUDOERS_DIR=$tmp/etc/sudoers.d USERS_LIFECYCLE_DISPATCH=omarchy-lifecycle-dispatch USERS_REFUSAL_DELAY=0 USERS_SDDM_CONF=$tmp/etc/sddm.conf
     mkdir -p "$USERS_SUDOERS_DIR"
     source "$ROOT/bin/omarchy-user-functions"
     users_load_drive
@@ -225,12 +248,12 @@ expect_refused() {
 }
 
 expect_refused "a five-character password is refused" "at least 6 characters" users_add dhh child five five5 ownerpw
-expect_refused "another account's password is refused" "already has this password" users_add dhh child five ownerpw ownerpw
+expect_refused "another account's password is refused" "already unlocks this computer" users_add dhh child five ownerpw ownerpw
 printf '7\tleftover1\n' >>"$tmp/slots"
-expect_refused "a password still opening an old slot is refused" "already has this password" users_add dhh child five leftover1 ownerpw
+expect_refused "a password still opening an old slot is refused" "already unlocks this computer" users_add dhh child five leftover1 ownerpw
 awk -F'\t' '$1 != 7' "$tmp/slots" >"$tmp/slots.new" && mv "$tmp/slots.new" "$tmp/slots"
 expect_refused "a child can't add a user" "Only a grown-up" users_add emma child five fivepass kidpass
-expect_refused "a wrong caller password is refused" "isn't dhh's password" users_add dhh child five fivepass wrongpw
+expect_refused "a wrong caller password is refused" "isn't the password that unlocks this computer for dhh" users_add dhh child five fivepass wrongpw
 expect_refused "an existing name is refused" "already a user or group named emma" users_add dhh child emma fivepass ownerpw
 expect_refused "a name with capitals is refused" "lowercase" users_add dhh child Emma fivepass ownerpw
 ! getent passwd five >/dev/null || fail "no refused add leaves an account"
@@ -299,17 +322,64 @@ opens kidpass 1 || fail "a failed change keeps the old slot"
 [[ -z $(awk -F'\t' '$2 == "reset123"' "$tmp/slots") ]] || fail "a failed change removes the new slot" "$(cat "$tmp/slots")"
 pass "a password change that fails before the account changes keeps the old password everywhere"
 
-# Interrupted after the account took the new password: roll forward.
+# Interrupted after chpasswd but before the journal said so: shadow itself
+# says the account took the new password, so it rolls forward.
+before=$(users users_fingerprint emma)
 printf '2\tforward1\n' >>"$tmp/slots"
 printf 'emma:forward1\n' | chpasswd
 mkdir -p "$tmp/var"
-printf 'op=password\nuser=emma\nold_slot=1\nslot=2\nphase=shadow\n' >"$tmp/var/journal"
+printf 'op=password\nuser=emma\nuuid=uuid-root\nold_slot=1\nslot=2\nold_fp=%s\nphase=key\n' "$before" >"$tmp/var/journal"
 users users_finish 2>"$tmp/err" || fail "finishing an interrupted change" "$(cat "$tmp/err")"
-[[ $(map_line emma | cut -d' ' -f2) == "2" ]] || fail "an interrupted change past the account rolls forward to the new slot"
+[[ $(map_line emma | cut -d' ' -f2) == "2" ]] || fail "a change whose account took the new password rolls forward to the new slot"
 ! opens kidpass 1 || fail "rolling forward retires the old slot"
 users users_in_sync emma || fail "rolled forward, the account is in sync"
-pass "a change interrupted after the account took the new password is finished, not undone"
+pass "a change interrupted after the account took the new password is finished, not undone, whatever the phase said"
 
+# Killed after luksAddKey, before anything else: the slot was journaled before
+# the key went in, so it is taken back.
+reset_system
+users users_add dhh child emma kidpass ownerpw 2>/dev/null
+TEST_CRASH_AFTER_ADDKEY=1 users users_password dhh emma reset123 ownerpw 2>/dev/null && fail "a change whose key step fails fails"
+[[ -z $(awk -F'\t' '$2 == "reset123"' "$tmp/slots") ]] || fail "a key added before the step failed is taken back" "$(cat "$tmp/slots")"
+login_is emma kidpass && opens kidpass 1 || fail "the old password still works everywhere"
+TEST_CRASH_AFTER_ADDKEY=1 users users_add dhh child zoe zoepass1 ownerpw 2>/dev/null && fail "an add whose key step fails fails"
+[[ -z $(awk -F'\t' '$2 == "zoepass1"' "$tmp/slots") ]] && ! getent passwd zoe >/dev/null || fail "an add whose key went in before the failure leaves neither key nor account"
+pass "a key that reached the disk before its step failed is never left behind"
+
+TEST_FAIL_DUMP=1 users users_delete dhh emma ownerpw yes 2>/dev/null && fail "a delete that can't read the disk's slots fails"
+[[ -f $tmp/var/journal ]] || fail "the unfinished delete stays journaled"
+opens kidpass 1 || fail "nothing claimed the slot was gone"
+users users_finish 2>"$tmp/err" || fail "the delete finishes once the disk can be read" "$(cat "$tmp/err")"
+! opens kidpass 1 && ! getent passwd emma >/dev/null || fail "the finished delete removed the slot and the account"
+grep -q -- '-L -e 1 emma' "$tmp/usermod" || fail "the account is locked before it is torn down"
+pass "a disk whose slots can't be read stops a delete instead of passing as revoked, and a later run finishes it"
+
+reset_system
+users users_add dhh child emma kidpass ownerpw 2>/dev/null
+printf 'emma:drifted1\n' | chpasswd
+expect_refused "a reset to a password still in a slot is refused" "already unlocks this computer" users_password dhh emma kidpass ownerpw
+pass "a reset to a password still in someone's slot is refused, so no slot is ever duplicated"
+
+printf 'dhh:drifted2\n' | chpasswd
+users users_password dhh dhh resynced1 ownerpw 2>"$tmp/err" || fail "an owner whose login drifted resyncs with the password that unlocks the computer" "$(cat "$tmp/err")"
+login_is dhh resynced1 && [[ -n $(awk -F'\t' '$2 == "resynced1"' "$tmp/slots") ]] && users users_in_sync dhh || fail "the resynced owner is in step"
+pass "someone whose login password was changed with passwd gets back in step with the password that unlocks the computer"
+
+printf 'op=delete\nuser=emma\nuuid=uuid-elsewhere\nslot=1\nphase=remove\n' >"$tmp/var/journal"
+expect_refused "a journal from another disk is refused" "another disk" users_finish
+opens kidpass 1 || fail "a journal from another disk removes nothing"
+rm -f "$tmp/var/journal"
+pass "a journal recording another disk is never replayed on this one"
+
+reset_system
+mkdir -p "$tmp/etc"
+printf '[Autologin]\nUser=dhh\n' >"$tmp/etc/sddm.conf"
+expect_refused "an autologin in sddm.conf blocks a second person" "logs someone in automatically" users_add dhh child emma kidpass ownerpw
+rm -f "$tmp/etc/sddm.conf"
+pass "a second person is never given a disk key while /etc/sddm.conf logs someone in"
+
+reset_system
+users users_add dhh child emma kidpass ownerpw 2>/dev/null
 printf 'emma:outofband\n' | chpasswd
 ! users users_in_sync emma || fail "a password changed with passwd is out of sync"
 [[ $(users users_list | grep emma) == "emma child no" ]] || fail "list marks the drifted account"
@@ -329,20 +399,23 @@ pass "the helper refuses to start outside a privileged Bash"
 
 # --- omarchy-login-select, before every SDDM start ---
 
-autologin_file=$tmp/etc/sddm.conf.d/autologin.conf
+sddm_dir=$tmp/etc/sddm.conf.d
 slot_record=$tmp/run/omarchy/luks-slot
 
+# Both ExecStartPre steps, as systemd runs them: the clear must succeed for
+# SDDM to start at all, the choice may fail.
 select_login() {
   (
-    export USERS_DIR=$tmp/etc/omarchy/users USERS_JOURNAL=$tmp/var/journal USERS_SHADOW=$tmp/shadow USERS_LIFECYCLE_DISPATCH=omarchy-lifecycle-dispatch
-    export LOGIN_SELECT_AUTOLOGIN=$autologin_file LOGIN_SELECT_SLOT_RECORD=$slot_record
-    "$ROOT/bin/omarchy-login-select"
+    export USERS_JOURNAL=$tmp/var/journal USERS_SHADOW=$tmp/shadow USERS_LIFECYCLE_DISPATCH=omarchy-lifecycle-dispatch
+    export LOGIN_SELECT_USERS_DIR=$tmp/etc/omarchy/users LOGIN_SELECT_SDDM_DIR=$sddm_dir LOGIN_SELECT_SDDM_CONF=$tmp/etc/sddm.conf LOGIN_SELECT_SLOT_RECORD=$slot_record
+    "$ROOT/bin/omarchy-login-select" --clear || exit 1
+    "$ROOT/bin/omarchy-login-select" || true
   )
 }
 
 static_owner_autologin() {
-  mkdir -p "${autologin_file%/*}"
-  printf '[Autologin]\nUser=dhh\nSession=omarchy.desktop\n' >"$autologin_file"
+  mkdir -p "$sddm_dir"
+  printf '[Autologin]\nUser=dhh\nSession=omarchy.desktop\n' >"$sddm_dir/autologin.conf"
 }
 
 record_slot() {
@@ -350,9 +423,15 @@ record_slot() {
   echo "$1" >"$slot_record"
 }
 
+# Whom SDDM logs in: the last User= under [Autologin] across its drop-ins in
+# name order, then /etc/sddm.conf, which outranks them all.
 autologin_user() {
-  [[ -f $autologin_file ]] && awk -F= '$1 == "User" { print $2 }' "$autologin_file"
-  true
+  local user="" file
+  for file in "$sddm_dir"/*.conf "$tmp/etc/sddm.conf"; do
+    [[ -f $file ]] || continue
+    user=$(awk -F= -v u="$user" '/^\[/ { s = $0 } s == "[Autologin]" && $1 == "User" { u = $2 } END { print u }' "$file")
+  done
+  echo "$user"
 }
 
 reset_system
@@ -363,15 +442,15 @@ pass "before Setup > Users adds anyone, login selection leaves the installer's a
 
 users users_add dhh child emma kidpass ownerpw 2>/dev/null
 select_login
-[[ ! -f $autologin_file ]] || fail "with two accounts and no unlock record, the owner's static autologin is gone"
+[[ -z $(autologin_user) ]] || fail "with two accounts and no unlock record, the owner's static autologin is gone"
 pass "the moment a second person has a disk key, the owner's static autologin is gone"
 
 record_slot "uuid-root 1"
 select_login
 [[ $(autologin_user) == "emma" ]] || fail "the slot that unlocked the disk picks its account"
-grep -qx 'Relogin=false' "$autologin_file" || fail "the autologin never logs back in after a logout"
+grep -qx 'Relogin=false' "$sddm_dir/zz-omarchy-autologin.conf" || fail "the autologin never logs back in after a logout"
 select_login
-[[ ! -f $autologin_file ]] || fail "a second SDDM start in the same boot shows the login screen"
+[[ -z $(autologin_user) ]] || fail "a second SDDM start in the same boot shows the login screen"
 pass "the unlocking slot picks its account once, and a restarted SDDM shows the login screen"
 
 record_slot "uuid-root 0"
@@ -379,14 +458,14 @@ select_login
 [[ $(autologin_user) == "dhh" ]] || fail "the owner's slot picks the owner"
 record_slot "uuid-other 1"
 select_login
-[[ ! -f $autologin_file ]] || fail "a record for another volume picks nobody"
+[[ -z $(autologin_user) ]] || fail "a record for another volume picks nobody"
 record_slot "uuid-root 9"
 select_login
-[[ ! -f $autologin_file ]] || fail "an unmapped slot picks nobody"
+[[ -z $(autologin_user) ]] || fail "an unmapped slot picks nobody"
 printf 'emma:outofband\n' | chpasswd
 record_slot "uuid-root 1"
 select_login
-[[ ! -f $autologin_file ]] || fail "a drifted account is not picked by its old slot"
+[[ -z $(autologin_user) ]] || fail "a drifted account is not picked by its old slot"
 pass "a record for another volume, an unmapped slot, or a drifted account shows the login screen"
 
 reset_system
@@ -394,12 +473,12 @@ users users_add dhh child emma kidpass ownerpw 2>/dev/null
 printf 'op=add\nuser=x\nphase=account\n' >"$tmp/var/journal"
 record_slot "uuid-root 1"
 select_login
-[[ ! -f $autologin_file ]] || fail "an unfinished change picks nobody"
+[[ -z $(autologin_user) ]] || fail "an unfinished change picks nobody"
 rm -f "$tmp/var/journal"
 echo "uuid-root 1 1001 emma x" >>"$tmp/etc/omarchy/users/slots"
 record_slot "uuid-root 1"
 select_login
-[[ ! -f $autologin_file ]] || fail "a map naming a slot twice picks nobody"
+[[ -z $(autologin_user) ]] || fail "a map naming a slot twice picks nobody"
 pass "an unfinished change or an inconsistent map shows the login screen"
 
 reset_system
@@ -413,5 +492,22 @@ reset_system unencrypted
 users users_add dhh child emma kidpass ownerpw 2>/dev/null
 static_owner_autologin
 select_login
-[[ ! -f $autologin_file ]] || fail "an unencrypted install with users shows the login screen"
+[[ -z $(autologin_user) ]] || fail "an unencrypted install with users shows the login screen"
 pass "an unencrypted install with people added always shows the login screen"
+
+reset_system
+users users_add dhh child emma kidpass ownerpw 2>/dev/null
+mkdir -p "$sddm_dir"
+printf '[Autologin]\nUser=dhh\n' >"$sddm_dir/50-someone.conf"
+select_login
+[[ -z $(autologin_user) ]] || fail "another drop-in naming the owner is overridden" "$(autologin_user)"
+record_slot "uuid-root 1"
+select_login
+[[ $(autologin_user) == "emma" ]] || fail "the chosen account outranks another drop-in"
+pass "the managed drop-in sorts last and always names a user, empty or chosen, over any other drop-in"
+
+printf '[Autologin]\nUser=dhh\n' >"$tmp/etc/sddm.conf"
+if select_login 2>/dev/null; then
+  fail "an autologin in sddm.conf on a machine with two people stops SDDM instead of opening the owner's desktop"
+fi
+pass "an autologin in /etc/sddm.conf, which no drop-in outranks, stops SDDM rather than open the owner's desktop"

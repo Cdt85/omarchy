@@ -279,6 +279,7 @@
   "setupForm.passwordMismatch": "Passwords didn't match!",
   "setupForm.passwordPlaceholder": "Used for user + root, and disk encryption when enabled",
   "setupForm.passwordPrompt": "Password> ",
+  "setupForm.passwordTooShort": "Your password must be at least %1 characters!",
   "setupForm.timezoneHeader": "Timezone",
   "setupForm.usernameInvalid": "Username must be alphanumeric with no spaces",
   "setupForm.usernamePlaceholder": "Alphanumeric without spaces (like dhh)",

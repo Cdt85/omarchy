@@ -1,0 +1,328 @@
+#!/bin/bash
+
+set -euo pipefail
+
+source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/base-test.sh"
+
+# omarchy-user-functions against a fake system: passwd, group and shadow files
+# the account tools edit, and a cryptsetup whose key slots are a table of
+# passwords. The owner, dhh, starts with slot 0 and root's password, as an
+# encrypted install leaves them.
+
+tmp=$(mktemp -d)
+trap 'rm -rf "$tmp"' EXIT
+export TEST_TMP=$tmp
+mkdir -p "$tmp/bin"
+
+fake() {
+  cat >"$tmp/bin/$1"
+  chmod +x "$tmp/bin/$1"
+}
+
+fake getent <<'SH'
+#!/bin/bash
+file=$TEST_TMP/$1
+if [[ -n ${2:-} ]]; then
+  awk -F: -v key="$2" '$1 == key || ($3 == key && key ~ /^[0-9]+$/) { print; found = 1; exit } END { exit !found }' "$file"
+else
+  cat "$file"
+fi
+SH
+
+fake id <<'SH'
+#!/bin/bash
+flag=$1
+[[ ${2:-} == "--" ]] && shift
+who=$2
+entry=$(awk -F: -v key="$who" '$1 == key || $3 == key { print; exit }' "$TEST_TMP/passwd")
+[[ -n $entry ]] || exit 1
+IFS=: read -r name _ uid _ <<<"$entry"
+case $flag in
+  -u) echo "$uid" ;;
+  -un) echo "$name" ;;
+  -nG) { echo "$name"; awk -F: -v user="$name" '{ n = split($4, m, ","); for (i = 1; i <= n; i++) if (m[i] == user) print $1 }' "$TEST_TMP/group"; } | paste -sd' ' - ;;
+esac
+SH
+
+fake useradd <<'SH'
+#!/bin/bash
+[[ -n ${TEST_FAIL_USERADD:-} ]] && exit 1
+while (( $# > 1 )); do
+  case $1 in
+    -G) groups=$2; shift 2 ;;
+    -s) shell=$2; shift 2 ;;
+    *) shift ;;
+  esac
+done
+name=$1
+uid=$(awk -F: 'BEGIN { max = 999 } $3 >= 1000 && $3 < 60000 && $3 > max { max = $3 } END { print max + 1 }' "$TEST_TMP/passwd")
+echo "$name:x:$uid:$uid::/home/$name:$shell" >>"$TEST_TMP/passwd"
+echo "$name:!:20000::::::" >>"$TEST_TMP/shadow"
+for group in ${groups//,/ }; do
+  awk -F: -v OFS=: -v g="$group" -v u="$name" '$1 == g { $4 = ($4 == "" ? u : $4 "," u) } { print }' "$TEST_TMP/group" >"$TEST_TMP/group.new"
+  mv "$TEST_TMP/group.new" "$TEST_TMP/group"
+done
+SH
+
+fake userdel <<'SH'
+#!/bin/bash
+name=${!#}
+grep -q "^$name:" "$TEST_TMP/passwd" || exit 6
+for file in passwd shadow; do
+  grep -v "^$name:" "$TEST_TMP/$file" >"$TEST_TMP/$file.new" || true
+  mv "$TEST_TMP/$file.new" "$TEST_TMP/$file"
+done
+awk -F: -v OFS=: -v u="$name" '{ n = split($4, m, ","); out = ""; for (i = 1; i <= n; i++) if (m[i] != u) out = (out == "" ? m[i] : out "," m[i]); $4 = out; print }' "$TEST_TMP/group" >"$TEST_TMP/group.new"
+mv "$TEST_TMP/group.new" "$TEST_TMP/group"
+[[ $1 == "-r" ]] && echo "$name" >>"$TEST_TMP/homes-removed"
+true
+SH
+
+fake groupadd <<'SH'
+#!/bin/bash
+echo "${!#}:x:900:" >>"$TEST_TMP/group"
+SH
+
+fake chpasswd <<'SH'
+#!/bin/bash
+[[ -n ${TEST_FAIL_CHPASSWD:-} ]] && exit 1
+IFS= read -r line
+user=${line%%:*}
+password=${line#*:}
+hash=$(printf '%s' "$password" | perl -e 'local $/; my $p = <STDIN>; my @c = ("a".."z"); my $s = join "", map { $c[rand @c] } 1..8; print crypt($p, "\$6\$$s\$")')
+awk -F: -v OFS=: -v u="$user" -v h="$hash" '$1 == u { $2 = h } { print }' "$TEST_TMP/shadow" >"$TEST_TMP/shadow.new"
+mv "$TEST_TMP/shadow.new" "$TEST_TMP/shadow"
+SH
+
+fake loginctl <<'SH'
+#!/bin/bash
+echo "$*" >>"$TEST_TMP/loginctl"
+SH
+
+fake findmnt <<'SH'
+#!/bin/bash
+cat "$TEST_TMP/root-source"
+SH
+
+fake lsblk <<'SH'
+#!/bin/bash
+cat "$TEST_TMP/root-ancestry"
+SH
+
+fake omarchy-lifecycle-dispatch <<'SH'
+#!/bin/bash
+exit "${TEST_DISPATCH_STATUS:-3}"
+SH
+
+# Key slots are lines of "<slot><TAB><password>".
+fake cryptsetup <<'SH'
+#!/bin/bash
+slots=$TEST_TMP/slots
+slot_for() {
+  awk -F'\t' -v p="$1" '$2 == p { print $1; exit }' "$slots"
+}
+case $1 in
+  luksUUID) echo "uuid-root" ;;
+  isLuks) exit 0 ;;
+  luksDump)
+    echo "Keyslots:"
+    cut -f1 "$slots" | sort -n | sed 's/.*/  &: luks2/'
+    echo "Tokens:"
+    ;;
+  open)
+    password=$(cat)
+    slot=$(slot_for "$password")
+    [[ -n $slot ]] || { echo "No key available with this passphrase."; exit 2; }
+    echo "Key slot $slot unlocked."
+    ;;
+  luksAddKey)
+    [[ -n ${TEST_FAIL_ADDKEY:-} ]] && exit 1
+    args=("$@")
+    for (( i = 0; i < ${#args[@]}; i++ )); do
+      [[ ${args[i]} == "--key-file" ]] && current=$(cat "${args[i+1]}")
+    done
+    new=$(cat "${args[-1]}")
+    [[ -n $(slot_for "$current") ]] || exit 2
+    for (( slot = 0; slot < 32; slot++ )); do
+      cut -f1 "$slots" | grep -qx "$slot" || break
+    done
+    printf '%s\t%s\n' "$slot" "$new" >>"$slots"
+    ;;
+  luksKillSlot)
+    slot=${!#}
+    awk -F'\t' -v s="$slot" '$1 != s' "$slots" >"$slots.new"
+    mv "$slots.new" "$slots"
+    ;;
+  *) exit 99 ;;
+esac
+SH
+
+export PATH="$tmp/bin:$PATH"
+
+reset_system() {
+  rm -rf "$tmp/etc" "$tmp/var"
+  rm -f "$tmp/homes-removed" "$tmp/loginctl"
+  printf 'root:x:0:0::/root:/bin/bash\nnobody:x:65534:65534::/:/usr/bin/nologin\ndhh:x:1000:1000::/home/dhh:/bin/bash\n' >"$tmp/passwd"
+  printf 'root:x:0:\nwheel:x:998:dhh\ndhh:x:1000:\n' >"$tmp/group"
+  printf 'root:!:20000::::::\nnobody:!:20000::::::\ndhh:!:20000::::::\n' >"$tmp/shadow"
+  printf '0\townerpw\n' >"$tmp/slots"
+  if [[ ${1:-encrypted} == "encrypted" ]]; then
+    echo '/dev/mapper/root[/@]' >"$tmp/root-source"
+    printf '/dev/mapper/root crypt btrfs\n/dev/nvme0n1p2 part crypto_LUKS\n' >"$tmp/root-ancestry"
+  else
+    echo '/dev/nvme0n1p2' >"$tmp/root-source"
+    printf '/dev/nvme0n1p2 part btrfs\n' >"$tmp/root-ancestry"
+  fi
+  printf 'dhh:ownerpw\n' | chpasswd
+  printf 'root:ownerpw\n' | chpasswd
+}
+
+# Each call runs the library fresh in a subshell, as each helper run does.
+users() {
+  (
+    export USERS_DIR=$tmp/etc/omarchy/users USERS_JOURNAL=$tmp/var/journal USERS_LOCK=$tmp/run/lock
+    export USERS_SHADOW=$tmp/shadow USERS_SUDOERS_DIR=$tmp/etc/sudoers.d USERS_LIFECYCLE_DISPATCH=omarchy-lifecycle-dispatch USERS_REFUSAL_DELAY=0
+    mkdir -p "$USERS_SUDOERS_DIR"
+    source "$ROOT/bin/omarchy-user-functions"
+    users_load_drive
+    "$@"
+  )
+}
+
+opens() {
+  [[ $(awk -F'\t' -v p="$1" '$2 == p { print $1; exit }' "$tmp/slots") == "$2" ]]
+}
+
+login_is() {
+  users users_password_matches "$2" "$1"
+}
+
+map_line() {
+  awk -v u="$1" '$4 == u { print $1, $2, $3, $4 }' "$tmp/etc/omarchy/users/slots"
+}
+
+reset_system
+users users_add dhh child emma kidpass ownerpw 2>"$tmp/err" || fail "an adult adds a child" "$(cat "$tmp/err")"
+[[ $(grep '^omarchy-child:' "$tmp/group" | cut -d: -f4) == "emma" ]] || fail "the child is in omarchy-child" "$(cat "$tmp/group")"
+[[ $(grep '^wheel:' "$tmp/group" | cut -d: -f4) == "dhh" ]] || fail "the child is not in wheel"
+login_is emma kidpass || fail "the child's login password is set"
+opens kidpass 1 || fail "the child's password opens its own slot" "$(cat "$tmp/slots")"
+[[ $(map_line dhh) == "uuid-root 0 1000 dhh" && $(map_line emma) == "uuid-root 1 1001 emma" ]] || fail "the map records the owner's and the child's slots" "$(cat "$tmp/etc/omarchy/users/slots")"
+[[ $(cat "$tmp/etc/omarchy/users/root") == "dhh" ]] || fail "root's holder is the owner whose password root has"
+[[ $(cat "$tmp/etc/sudoers.d/00-omarchy-wheel") == "%wheel ALL=(ALL:ALL) ALL" ]] || fail "the wheel grant is written for later adults"
+[[ ! -e $tmp/var/journal ]] || fail "a finished add leaves no journal"
+users users_map_valid || fail "the map is valid after an add"
+[[ $(users users_list) == $'dhh adult yes\nemma child yes' ]] || fail "list names each account, its role and whether it is in sync" "$(users users_list)"
+pass "an adult adds a child: own account, own slot, mapped, not in wheel"
+
+expect_refused() {
+  local description=$1 message=$2
+  shift 2
+  if users "$@" 2>"$tmp/err"; then
+    fail "$description"
+  fi
+  grep -qF "$message" "$tmp/err" || fail "$description: says why" "$(cat "$tmp/err")"
+}
+
+expect_refused "a five-character password is refused" "at least 6 characters" users_add dhh child five five5 ownerpw
+expect_refused "another account's password is refused" "already has this password" users_add dhh child five ownerpw ownerpw
+printf '7\tleftover1\n' >>"$tmp/slots"
+expect_refused "a password still opening an old slot is refused" "already has this password" users_add dhh child five leftover1 ownerpw
+awk -F'\t' '$1 != 7' "$tmp/slots" >"$tmp/slots.new" && mv "$tmp/slots.new" "$tmp/slots"
+expect_refused "a child can't add a user" "Only a grown-up" users_add emma child five fivepass kidpass
+expect_refused "a wrong caller password is refused" "isn't dhh's password" users_add dhh child five fivepass wrongpw
+expect_refused "an existing name is refused" "already a user or group named emma" users_add dhh child emma fivepass ownerpw
+expect_refused "a name with capitals is refused" "lowercase" users_add dhh child Emma fivepass ownerpw
+! getent passwd five >/dev/null || fail "no refused add leaves an account"
+[[ $(wc -l <"$tmp/slots") == 2 ]] || fail "no refused add leaves a slot" "$(cat "$tmp/slots")"
+pass "passwords must be six characters and nobody else's, on the disk as well as in shadow; only adults add"
+
+TEST_DISPATCH_STATUS=0 expect_refused "a platform that records slots refuses a second person's slot" "boot checks" users_add dhh child five fivepass ownerpw
+pass "a platform whose boot checks record key slots refuses another person's slot"
+
+users users_password emma emma newkid1 kidpass 2>"$tmp/err" || fail "a child changes their own password" "$(cat "$tmp/err")"
+login_is emma newkid1 || fail "the child's login password changed"
+! opens kidpass 1 || fail "the old child password no longer opens the disk" "$(cat "$tmp/slots")"
+[[ -n $(awk -F'\t' '$2 == "newkid1"' "$tmp/slots") ]] || fail "the new child password opens a slot"
+[[ $(map_line emma | cut -d' ' -f2) == "$(awk -F'\t' '$2 == "newkid1" { print $1 }' "$tmp/slots")" ]] || fail "the map follows the child's new slot"
+login_is root ownerpw || fail "a child's change leaves root alone"
+expect_refused "a child can't change someone else's password" "Only a grown-up" users_password emma dhh hijacked newkid1
+expect_refused "the current password is refused as the new one" "already emma's password" users_password emma emma newkid1 newkid1
+pass "a child changes their own password: login, slot and map together, and nobody else's"
+
+users users_password dhh emma reset123 ownerpw 2>"$tmp/err" || fail "an adult resets a child's password" "$(cat "$tmp/err")"
+login_is emma reset123 || fail "the reset sets the child's login"
+[[ -z $(awk -F'\t' '$2 == "newkid1"' "$tmp/slots") ]] || fail "the reset retires the forgotten password's slot"
+users users_in_sync emma || fail "the reset child is in sync"
+pass "an adult resets a child's forgotten password with their own"
+
+users users_password dhh dhh owner-new ownerpw 2>"$tmp/err" || fail "the owner changes their own password" "$(cat "$tmp/err")"
+login_is root owner-new || fail "root's password follows its holder"
+opens owner-new 0 || [[ -n $(awk -F'\t' '$2 == "owner-new"' "$tmp/slots") ]] || fail "the owner's new password opens the disk"
+[[ -z $(awk -F'\t' '$2 == "ownerpw"' "$tmp/slots") ]] || fail "the owner's old password no longer opens the disk"
+pass "root's password follows the owner whose password it was"
+
+expect_refused "you can't delete yourself" "signed in as" users_delete dhh dhh owner-new no
+expect_refused "a child can't delete" "Only a grown-up" users_delete emma dhh reset123 no
+users users_add dhh adult bob bobpass1 owner-new 2>"$tmp/err" || fail "an adult adds an adult" "$(cat "$tmp/err")"
+[[ $(grep '^wheel:' "$tmp/group" | cut -d: -f4) == "dhh,bob" ]] || fail "an added adult is in wheel"
+users users_delete bob dhh bobpass1 no 2>"$tmp/err" || fail "another adult deletes root's holder" "$(cat "$tmp/err")"
+login_is root bobpass1 || fail "deleting root's holder hands root to the adult who deleted them"
+[[ $(cat "$tmp/etc/omarchy/users/root") == "bob" ]] || fail "the holder file names the new holder"
+[[ -z $(awk -F'\t' '$2 == "owner-new"' "$tmp/slots") ]] || fail "the deleted adult's slot is gone"
+! getent passwd dhh >/dev/null || fail "the deleted account is gone"
+[[ ! -e $tmp/homes-removed ]] || fail "the home is kept unless asked"
+grep -qx 'terminate-user dhh' "$tmp/loginctl" || fail "the deleted user's sessions are ended"
+[[ -z $(map_line dhh) ]] || fail "the deleted user leaves the map"
+users users_map_valid || fail "the map is valid after a delete"
+expect_refused "a child can't delete the last adult" "Only a grown-up" users_delete emma bob reset123 no
+pass "deletion: never yourself, never the last adult, and root never keeps a deleted person's password"
+
+echo 'emma ALL=(ALL) NOPASSWD: ALL' >"$tmp/etc/sudoers.d/99-omarchy-permanent-nopasswd-1001"
+users users_delete bob emma bobpass1 yes 2>"$tmp/err" || fail "an adult deletes a child" "$(cat "$tmp/err")"
+[[ ! -e $tmp/etc/sudoers.d/99-omarchy-permanent-nopasswd-1001 ]] || fail "a deleted user's passwordless grant goes with them"
+grep -qx emma "$tmp/homes-removed" || fail "the home is removed when asked"
+[[ $(wc -l <"$tmp/slots") == 1 ]] || fail "only the remaining adult's slot is left" "$(cat "$tmp/slots")"
+pass "deleting a user removes their slot, map entry, passwordless grant and, when asked, their home"
+
+reset_system
+TEST_FAIL_CHPASSWD=1 users users_add dhh child emma kidpass ownerpw 2>/dev/null && fail "an add whose password can't be set fails"
+! getent passwd emma >/dev/null || fail "a failed add removes the half-made account"
+[[ $(wc -l <"$tmp/slots") == 1 ]] || fail "a failed add removes the slot it added" "$(cat "$tmp/slots")"
+[[ ! -e $tmp/var/journal ]] || fail "a rolled-back add leaves no journal"
+pass "an add that fails part way rolls back its account and slot"
+
+users users_add dhh child emma kidpass ownerpw 2>/dev/null
+TEST_FAIL_CHPASSWD=1 users users_password dhh emma reset123 ownerpw 2>/dev/null && fail "a change whose password can't be set fails"
+login_is emma kidpass || fail "a failed change keeps the old login"
+opens kidpass 1 || fail "a failed change keeps the old slot"
+[[ -z $(awk -F'\t' '$2 == "reset123"' "$tmp/slots") ]] || fail "a failed change removes the new slot" "$(cat "$tmp/slots")"
+pass "a password change that fails before the account changes keeps the old password everywhere"
+
+# Interrupted after the account took the new password: roll forward.
+printf '2\tforward1\n' >>"$tmp/slots"
+printf 'emma:forward1\n' | chpasswd
+mkdir -p "$tmp/var"
+printf 'op=password\nuser=emma\nold_slot=1\nslot=2\nphase=shadow\n' >"$tmp/var/journal"
+users users_finish 2>"$tmp/err" || fail "finishing an interrupted change" "$(cat "$tmp/err")"
+[[ $(map_line emma | cut -d' ' -f2) == "2" ]] || fail "an interrupted change past the account rolls forward to the new slot"
+! opens kidpass 1 || fail "rolling forward retires the old slot"
+users users_in_sync emma || fail "rolled forward, the account is in sync"
+pass "a change interrupted after the account took the new password is finished, not undone"
+
+printf 'emma:outofband\n' | chpasswd
+! users users_in_sync emma || fail "a password changed with passwd is out of sync"
+[[ $(users users_list | grep emma) == "emma child no" ]] || fail "list marks the drifted account"
+pass "a password changed outside Setup > Users shows as out of sync"
+
+reset_system unencrypted
+users users_add dhh child emma kidpass ownerpw 2>"$tmp/err" || fail "an unencrypted install adds a child" "$(cat "$tmp/err")"
+login_is emma kidpass || fail "the unencrypted child can log in"
+[[ $(wc -l <"$tmp/slots") == 1 && ! -e $tmp/etc/omarchy/users/slots ]] || fail "an unencrypted install touches no slots"
+[[ $(users users_list) == $'dhh adult -\nemma child -' ]] || fail "list shows no sync on an unencrypted install" "$(users users_list)"
+pass "an unencrypted install adds users without disk slots"
+
+if /usr/bin/bash "$ROOT/bin/omarchy-user-helper" list 2>/dev/null; then
+  fail "the helper refuses a Bash not started with -p"
+fi
+pass "the helper refuses to start outside a privileged Bash"

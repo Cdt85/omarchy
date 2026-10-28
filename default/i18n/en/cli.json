@@ -373,6 +373,12 @@
   "users.addWho": "Who are you adding?",
   "users.added": "Added %1. They type their own password at startup to unlock the computer and sign in.",
   "users.adult": "Adult",
+  "users.apps": "Apps",
+  "users.appsBlocked": {
+    "one": "%1 now has %2 app blocked.",
+    "other": "%1 now has %2 apps blocked."
+  },
+  "users.blockApps": "Apps %1 neither sees nor can run (space to tick, enter to save)",
   "users.changePassword": "Change password",
   "users.child": "Child",
   "users.confirmDelete": "Delete %1's account?",

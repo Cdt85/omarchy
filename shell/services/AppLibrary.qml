@@ -16,14 +16,10 @@ Item {
   property var configuredHiddenEntryIds: ({})
   property var desktopHiddenEntryIds: ({})
 
-  // A child's account (omarchy-child) sees only the apps a grown-up allowed:
-  // their list in /etc/omarchy/child-apps, or the shipped one until they keep
-  // their own. It curates the launcher; it does not stop anything running.
-  property bool childAccount: false
-  property var childAllowedIds: ({})
-  property bool systemChildAppsLoaded: false
-  property string systemChildApps: ""
-  property string defaultChildApps: ""
+  // Apps on this person's blocked list (/etc/omarchy/blocked-apps/<user>),
+  // which a grown-up keeps under Setup > Users: hidden here, and denied to them
+  // by omarchy-user-apps-apply where a program can be.
+  property var blockedEntryIds: ({})
 
   // Maps an icon name to a file on disk (e.g. "omacut" -> ".../apps/omacut.svg").
   // Used as a fallback for icons that Qt's themed lookup misses because they were
@@ -55,21 +51,21 @@ Item {
 
   function isHiddenEntry(entry) {
     var id = String((entry && entry.id) || "")
-    if (root.childAccount && root.childAllowedIds[id] !== true) return true
-    return root.configuredHiddenEntryIds[id] === true || root.desktopHiddenEntryIds[id] === true
+    return root.blockedEntryIds[id] === true || root.configuredHiddenEntryIds[id] === true || root.desktopHiddenEntryIds[id] === true
   }
 
-  function loadChildAllowed() {
-    // A grown-up's list, once it exists, is the whole list, even when empty.
-    var source = root.systemChildAppsLoaded ? root.systemChildApps : root.defaultChildApps
+  function isBlockedEntry(entry) {
+    return root.blockedEntryIds[String((entry && entry.id) || "")] === true
+  }
+
+  function loadBlocked(rawText) {
     var next = ({})
-    var lines = source.split(/\n/)
+    var lines = String(rawText || "").split(/\n/)
     for (var i = 0; i < lines.length; i++) {
-      var line = lines[i].trim()
-      if (line.length === 0 || line.charAt(0) === "#") continue
-      next[root.normalizeDesktopId(line)] = true
+      var id = root.normalizeDesktopId(lines[i])
+      if (id.length > 0 && id.charAt(0) !== "#") next[id] = true
     }
-    root.childAllowedIds = next
+    root.blockedEntryIds = next
     root.appsChanged()
   }
 
@@ -256,30 +252,13 @@ Item {
     onTriggered: if (!iconIndexScan.running) iconIndexScan.running = true
   }
 
-  Process {
-    command: ["id", "-nG"]
-    running: true
-    stdout: StdioCollector {
-      onStreamFinished: {
-        root.childAccount = (" " + String(text || "").trim() + " ").indexOf(" omarchy-child ") !== -1
-        root.appsChanged()
-      }
-    }
-  }
-
   FileView {
-    path: "/etc/omarchy/child-apps"
+    path: "/etc/omarchy/blocked-apps/" + (Quickshell.env("USER") || "")
     watchChanges: true
     printErrors: false
-    onLoaded: { root.systemChildAppsLoaded = true; root.systemChildApps = text(); root.loadChildAllowed() }
+    onLoaded: root.loadBlocked(text())
     onFileChanged: reload()
-    onLoadFailed: { root.systemChildAppsLoaded = false; root.systemChildApps = ""; root.loadChildAllowed() }
-  }
-
-  FileView {
-    path: root.omarchyPath + "/default/omarchy/child-apps"
-    printErrors: false
-    onLoaded: { root.defaultChildApps = text(); root.loadChildAllowed() }
+    onLoadFailed: root.loadBlocked("")
   }
 
   FileView {

@@ -180,11 +180,16 @@ case $1 in
 esac
 SH
 
+fake omarchy-user-apps-apply <<'SH'
+#!/bin/bash
+echo $(( $(cat "$TEST_TMP/apps-applied" 2>/dev/null || echo 0) + 1 )) >"$TEST_TMP/apps-applied"
+SH
+
 export PATH="$tmp/bin:$PATH"
 
 reset_system() {
   rm -rf "$tmp/etc" "$tmp/var"
-  rm -f "$tmp/homes-removed" "$tmp/loginctl" "$tmp/usermod"
+  rm -f "$tmp/homes-removed" "$tmp/loginctl" "$tmp/usermod" "$tmp/apps-applied"
   printf 'root:x:0:0::/root:/bin/bash\nnobody:x:65534:65534::/:/usr/bin/nologin\ndhh:x:1000:1000::/home/dhh:/bin/bash\n' >"$tmp/passwd"
   printf 'root:x:0:\nwheel:x:998:dhh\ndhh:x:1000:\n' >"$tmp/group"
   printf 'root:!:20000::::::\nnobody:!:20000::::::\ndhh:!:20000::::::\n' >"$tmp/shadow"
@@ -204,7 +209,7 @@ reset_system() {
 users() {
   (
     export USERS_DIR=$tmp/etc/omarchy/users USERS_JOURNAL=$tmp/var/journal USERS_LOCK=$tmp/run/lock
-    export USERS_SHADOW=$tmp/shadow USERS_SUDOERS_DIR=$tmp/etc/sudoers.d USERS_LIFECYCLE_DISPATCH=omarchy-lifecycle-dispatch USERS_REFUSAL_DELAY=0 USERS_SDDM_CONF=$tmp/etc/sddm.conf USERS_CHILD_APPS=$tmp/etc/omarchy/child-apps USERS_CHILD_APPS_DEFAULT=$ROOT/default/omarchy/child-apps USERS_RATE_DIR=$tmp/run/rate
+    export USERS_SHADOW=$tmp/shadow USERS_SUDOERS_DIR=$tmp/etc/sudoers.d USERS_LIFECYCLE_DISPATCH=omarchy-lifecycle-dispatch USERS_REFUSAL_DELAY=0 USERS_SDDM_CONF=$tmp/etc/sddm.conf USERS_BLOCKED_DIR=$tmp/etc/omarchy/blocked-apps USERS_BLOCKED_DEFAULT=$ROOT/default/omarchy/child-blocked-apps USERS_APPS_APPLY=omarchy-user-apps-apply USERS_RATE_DIR=$tmp/run/rate
     mkdir -p "$USERS_SUDOERS_DIR"
     source "$ROOT/bin/omarchy-user-functions"
     users_load_drive
@@ -236,9 +241,10 @@ opens kidpass 1 || fail "the child's password opens its own slot" "$(cat "$tmp/s
 [[ ! -e $tmp/var/journal ]] || fail "a finished add leaves no journal"
 users users_map_valid || fail "the map is valid after an add"
 [[ $(users users_list) == $'dhh adult yes\nemma child yes' ]] || fail "list names each account, its role and whether it is in sync" "$(users users_list)"
-cmp -s "$tmp/etc/omarchy/child-apps" "$ROOT/default/omarchy/child-apps" || fail "the first child seeds the app list grown-ups keep"
-[[ $(stat -c %a "$tmp/etc/omarchy/child-apps") == "644" ]] || fail "every session can read the child app list"
-pass "an adult adds a child: own account, own slot, mapped, not in wheel, with the app list seeded"
+[[ $(cat "$tmp/etc/omarchy/blocked-apps/emma") == "$(grep -v '^#' "$ROOT/default/omarchy/child-blocked-apps" | sort -u)" ]] || fail "a new child starts with the shipped blocked apps" "$(cat "$tmp/etc/omarchy/blocked-apps/emma")"
+[[ $(stat -c %a "$tmp/etc/omarchy/blocked-apps/emma") == "644" ]] || fail "the child's session can read their blocked list"
+[[ $(cat "$tmp/apps-applied") == "1" ]] || fail "the blocked list is enforced once written"
+pass "an adult adds a child: own account, own slot, mapped, not in wheel, starting with the shipped blocked apps"
 
 expect_refused() {
   local description=$1 message=$2
@@ -535,3 +541,19 @@ printf '0 0\n' >"$tmp/run/rate/adult-check-1001"
 users users_adult_check emma ownerpw 2>/dev/null || fail "once the lockout is over the right password works"
 [[ ! -f $tmp/run/rate/adult-check-1001 ]] || fail "a success clears the count"
 pass "five wrong grown-up passwords lock a child's lock screen out of that path for a while"
+
+# --- Blocked apps ---
+
+reset_system
+users users_add dhh child emma kidpass ownerpw 2>/dev/null
+printf 'Steam\nGoogle Messages\n' | users users_apps dhh emma ownerpw 2>"$tmp/err" || fail "an adult sets a child's blocked apps" "$(cat "$tmp/err")"
+[[ $(cat "$tmp/etc/omarchy/blocked-apps/emma") == $'Google Messages\nSteam' ]] || fail "the list is written as given" "$(cat "$tmp/etc/omarchy/blocked-apps/emma")"
+[[ $(cat "$tmp/apps-applied") == "2" ]] || fail "a changed list is enforced"
+printf 'Steam\n' | users users_apps emma emma kidpass 2>/dev/null && fail "a child can't change a blocked list"
+printf '../../etc/passwd\n' | users users_apps dhh emma ownerpw 2>/dev/null && fail "only desktop ids go on a list"
+pass "only an adult sets someone's blocked apps, and only desktop ids"
+
+users users_delete dhh emma ownerpw yes 2>/dev/null
+[[ ! -e $tmp/etc/omarchy/blocked-apps/emma ]] || fail "a deleted person's blocked list goes with them"
+[[ $(cat "$tmp/apps-applied") == "3" ]] || fail "their ACLs are removed before the account"
+pass "deleting someone takes their blocked list and its ACLs with them"

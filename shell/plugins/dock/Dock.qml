@@ -59,8 +59,8 @@ Item {
     var pinned = (root.pendingPins || DockModel.pinnedIds(dockConfig, defaultDockConfig)).filter(function(id) {
       var entry = DesktopEntries.byId(id)
       if (!entry) return false
-      // A child's dock offers only the apps their launcher does.
-      return !(library && library.childAccount && library.isHiddenEntry(entry))
+      // A blocked app is left out of the dock as it is out of the launcher.
+      return !(library && library.isBlockedEntry(entry))
     })
 
     var windows = []

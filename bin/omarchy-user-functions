@@ -22,12 +22,14 @@ fi
 : "${USERS_LIFECYCLE_DISPATCH:=/usr/bin/omarchy-lifecycle-dispatch}"
 : "${USERS_REFUSAL_DELAY:=3}"
 : "${USERS_RATE_DIR:=/run/omarchy-users}"
-: "${USERS_CHILD_APPS:=/etc/omarchy/child-apps}"
-: "${USERS_CHILD_APPS_DEFAULT:=/usr/share/omarchy/default/omarchy/child-apps}"
+: "${USERS_BLOCKED_DIR:=/etc/omarchy/blocked-apps}"
+: "${USERS_BLOCKED_DEFAULT:=/usr/share/omarchy/default/omarchy/child-blocked-apps}"
+: "${USERS_APPS_APPLY:=/usr/bin/omarchy-user-apps-apply}"
 
 USERS_SLOT_MAP=$USERS_DIR/slots
 USERS_ROOT_HOLDER=$USERS_DIR/root
 USERS_MIN_PASSWORD=6
+USERS_DESKTOP_ID='^[A-Za-z0-9._+ -]+$'
 USERS_ADULT_GROUP=wheel
 USERS_CHILD_GROUP=omarchy-child
 
@@ -502,11 +504,6 @@ users_add() {
   users_adopt_root_holder "$caller" "$caller_password" || return 1
   users_ensure_wheel_grant || return 1
   getent group "$groups" >/dev/null || groupadd -r "$groups" || return 1
-  # The first child gets the list of apps a child's launcher shows, for the
-  # grown-ups to keep under Setup > Users > Child Apps. Every session reads it.
-  if [[ $role == "child" && ! -f $USERS_CHILD_APPS && -f $USERS_CHILD_APPS_DEFAULT ]]; then
-    install -Dm644 "$USERS_CHILD_APPS_DEFAULT" "$USERS_CHILD_APPS" || return 1
-  fi
 
   users_journal_put op add user "$name" uuid "$USERS_UUID" slot "$slot" phase account || return 1
   useradd -m -G "$groups" -s /bin/bash "$name" || { users_finish; return 1; }
@@ -518,7 +515,13 @@ users_add() {
   fi
   users_set_passwords "$password" "$name" || { users_finish; return 1; }
   users_journal_put phase shadow || return 1
-  users_finish
+  users_finish || return 1
+  # A child starts with the shipped list of apps a child neither sees nor
+  # runs, for the grown-ups to change under Setup > Users.
+  if [[ $role == "child" && -f $USERS_BLOCKED_DEFAULT ]]; then
+    grep -v '^#' "$USERS_BLOCKED_DEFAULT" | users_write_blocked "$name" && "$USERS_APPS_APPLY" ||
+      users_say "Added $name, but could not block the apps a child starts without."
+  fi
 }
 
 users_password() {
@@ -664,6 +667,11 @@ users_finish() {
       if [[ $slot != "-" ]]; then
         users_kill_slot "$slot" || return 1
       fi
+      # Their blocked list goes, and with it the ACLs naming them, while the
+      # name still resolves.
+      if [[ -f $USERS_BLOCKED_DIR/$user ]]; then
+        rm -f "$USERS_BLOCKED_DIR/$user" && "$USERS_APPS_APPLY" || return 1
+      fi
       uid=$(users_journal_get uid)
       if [[ $uid =~ ^[0-9]+$ ]]; then
         rm -f "$USERS_SUDOERS_DIR/99-omarchy-nopasswd-$uid" "$USERS_SUDOERS_DIR/99-omarchy-permanent-nopasswd-$uid" || return 1
@@ -682,6 +690,37 @@ users_finish() {
       return 1
       ;;
   esac
+}
+
+# --- Blocked apps ----------------------------------------------------------------
+
+# The desktop ids on stdin become NAME's blocked list, which their session
+# reads to hide them and omarchy-user-apps-apply enforces.
+users_write_blocked() {
+  local name=$1 id tmp
+  mkdir -p "$USERS_BLOCKED_DIR" && chmod 755 "$USERS_BLOCKED_DIR" || return 1
+  tmp=$(mktemp "$USERS_BLOCKED_DIR/.$name.XXXXXX") || return 1
+  while read -r id; do
+    [[ -z $id ]] && continue
+    if [[ ! $id =~ $USERS_DESKTOP_ID ]]; then
+      rm -f "$tmp"
+      users_say "'$id' isn't an app id."
+      return 1
+    fi
+    printf '%s\n' "${id%.desktop}"
+  done | sort -u >"$tmp" && chmod 644 "$tmp" && mv -f "$tmp" "$USERS_BLOCKED_DIR/$name" || {
+    rm -f "$tmp"
+    return 1
+  }
+}
+
+users_apps() {
+  local caller=$1 name=$2 caller_password=$3
+  users_exists "$name" || { users_say "There is no user named $name."; return 1; }
+  users_authenticate "$caller" "$caller_password" || return 1
+  users_require_adult "$caller" || return 1
+  users_write_blocked "$name" || return 1
+  "$USERS_APPS_APPLY" || { users_say "Saved $name's blocked apps, but could not stop all of them running."; return 1; }
 }
 
 # --- A grown-up's password on a child's lock screen ------------------------------

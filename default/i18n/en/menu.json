@@ -674,9 +674,6 @@
   "setup.users.add": {
     "label": "Add"
   },
-  "setup.users.apps": {
-    "label": "Child Apps"
-  },
   "setup.security": {
     "label": "Security"
   },

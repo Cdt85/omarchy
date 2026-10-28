@@ -22,12 +22,12 @@ fi
 
 options=("$(omarchy-i18n users.changePassword)")
 if (( adult )) && [[ $name != "$me" ]]; then
-  options+=("$(omarchy-i18n users.delete)")
+  options+=("$(omarchy-i18n users.apps)" "$(omarchy-i18n users.delete)")
 fi
 
 choice=$(gum choose --header "$name" "${options[@]}") || exit 0
-if [[ $choice == "$(omarchy-i18n users.delete)" ]]; then
-  exec omarchy-user-delete "$name"
-else
-  exec omarchy-user-password "$name"
-fi
+case $choice in
+  "$(omarchy-i18n users.delete)") exec omarchy-user-delete "$name" ;;
+  "$(omarchy-i18n users.apps)") exec omarchy-user-apps "$name" ;;
+  *) exec omarchy-user-password "$name" ;;
+esac

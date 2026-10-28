@@ -39,7 +39,7 @@ Setup > Users
 - **Delete** ends the user's sessions, removes their slot, their map entry, any sudoers grant naming them (including `omarchy-sudo-passwordless`'s username-scoped `NOPASSWD: ALL` rule, which would otherwise pass to a later account of the same name), then the account, and asks whether to keep their home. It is not offered for the last adult (someone must be able to administer the machine) or for the account you are signed in as.
 - **Adults see every user; a child sees only their own entry, with only Change password.**
 
-The menu is a front end to `omarchy user list|add|delete|password`. Menu visibility is not the boundary: the privileged work happens in one root helper, `omarchy-user-helper`, which authorises each request itself:
+The menu's rows come from a `users` provider in `Menu.qml` (one per account, a check on yours, only yourself for a child), and each opens `omarchy user manage NAME`, which offers what the helper would allow; Add is a static row shown to adults. Underneath are `omarchy user list|add|delete|password`. Menu visibility is not the boundary: the privileged work happens in one root helper, `omarchy-user-helper`, which authorises each request itself:
 
 - an adult (in `wheel`, through `sudo`) may add, delete and set any password;
 - a child may only change their own password, through a `NOPASSWD` sudoers grant for `%omarchy-child` to that one helper subcommand, and the helper requires their current password before anything changes;
@@ -50,7 +50,8 @@ The menu is a front end to `omarchy user list|add|delete|password`. Menu visibil
 - **At least 6 characters**, enforced by the helper and by the shared setup form (`install/provisioning/setup-form.sh`, which today accepts any nonempty match), so the installer's owner prompt follows the same rule. Existing passwords are kept; the rule applies when one is set. Six is a floor against a child's first password, not a strong disk key: offline guessing is limited only by LUKS's key derivation, and the disk is as strong as its weakest password, so the prompt asks for something longer.
 - **Unique across accounts and across the disk.** A candidate is refused if it matches another account's shadow hash *or* opens any existing LUKS slot other than the one being replaced (tested with tokens disabled, as `luks_key_slot` and `omarchy-drive-password` already do). Shadow alone is not enough: an old password left in a slot after a `passwd` change no longer matches any hash but still opens that slot. Root's hash is skipped when it is deliberately the same password as its holder's (see *Root*).
 - The refusal says only that the password is taken. It does reveal that a guess is somebody's password, but so does the disk prompt at every boot, without limit; the helper adds a delay and a lockout after repeated refusals so it is no cheaper than that.
-- _Update > Password > User_ (plain `passwd`) and _Update > Password > Drive Encryption_ go away in favour of _Setup > Users > (you) > Change password_.
+- _Update > Password > User_ (plain `passwd`) goes away in favour of _Setup > Users > (you) > Change password_. _Drive Encryption_ stays for data drives, and `omarchy-drive-password` refuses the system disk once Setup > Users manages it.
+- **Apple Silicon** records every kept key slot for its boot check (`omarchy-lifecycle-dispatch luks-slots`), which a second person's slot would fail, so the helper refuses to add one wherever a slot recorder exists until the Mac boot package can record user slots.
 
 ### Drift
 

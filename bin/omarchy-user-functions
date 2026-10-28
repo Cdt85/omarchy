@@ -21,6 +21,7 @@ fi
 : "${USERS_SDDM_CONF:=/etc/sddm.conf}"
 : "${USERS_LIFECYCLE_DISPATCH:=/usr/bin/omarchy-lifecycle-dispatch}"
 : "${USERS_REFUSAL_DELAY:=3}"
+: "${USERS_RATE_DIR:=/run/omarchy-users}"
 : "${USERS_CHILD_APPS:=/etc/omarchy/child-apps}"
 : "${USERS_CHILD_APPS_DEFAULT:=/usr/share/omarchy/default/omarchy/child-apps}"
 
@@ -681,6 +682,52 @@ users_finish() {
       return 1
       ;;
   esac
+}
+
+# --- A grown-up's password on a child's lock screen ------------------------------
+
+# A child's lock screen accepts any adult's password too, so a parent can get
+# into a child's locked session (to set their screen time, say). Answered only
+# for a child, one attempt at a time, and after five misses not at all for two
+# minutes, doubling up to an hour, so it is no cheaper a guess than the login
+# screen. Every answer goes to the auth log.
+users_adult_check() {
+  local caller=$1 password=$2 uid state fd failures=0 until=0 now adult wait
+  if [[ $(users_role "$caller") != "child" ]]; then
+    users_say "Only a child's lock screen takes a grown-up's password."
+    return 1
+  fi
+  uid=$(id -u -- "$caller") || return 1
+  mkdir -p "$USERS_RATE_DIR" && chmod 700 "$USERS_RATE_DIR" || return 1
+  state=$USERS_RATE_DIR/adult-check-$uid
+  exec {fd}>>"$state.lock" && flock -x "$fd" || return 1
+  [[ -f $state ]] && read -r failures until <"$state"
+  [[ $failures =~ ^[0-9]+$ && $until =~ ^[0-9]+$ ]] || { failures=0; until=0; }
+  now=$(date +%s)
+  if (( until > now )); then
+    logger -p auth.notice -t omarchy-user-helper "refused a grown-up's password on $caller's lock screen: locked out" 2>/dev/null || true
+    sleep "$USERS_REFUSAL_DELAY"
+    return 1
+  fi
+
+  for adult in $(users_adults); do
+    if users_password_matches "$password" "$adult"; then
+      rm -f "$state"
+      logger -p auth.notice -t omarchy-user-helper "$adult's password unlocked $caller's session" 2>/dev/null || true
+      return 0
+    fi
+  done
+
+  failures=$(( failures + 1 ))
+  if (( failures >= 5 )); then
+    wait=$(( 120 << (failures - 5 > 5 ? 5 : failures - 5) ))
+    (( wait <= 3600 )) || wait=3600
+    until=$(( now + wait ))
+  fi
+  printf '%s %s\n' "$failures" "$until" >"$state"
+  logger -p auth.notice -t omarchy-user-helper "refused a grown-up's password on $caller's lock screen" 2>/dev/null || true
+  sleep "$USERS_REFUSAL_DELAY"
+  return 1
 }
 
 # --- Listing -------------------------------------------------------------------

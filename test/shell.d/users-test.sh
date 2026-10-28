@@ -204,7 +204,7 @@ reset_system() {
 users() {
   (
     export USERS_DIR=$tmp/etc/omarchy/users USERS_JOURNAL=$tmp/var/journal USERS_LOCK=$tmp/run/lock
-    export USERS_SHADOW=$tmp/shadow USERS_SUDOERS_DIR=$tmp/etc/sudoers.d USERS_LIFECYCLE_DISPATCH=omarchy-lifecycle-dispatch USERS_REFUSAL_DELAY=0 USERS_SDDM_CONF=$tmp/etc/sddm.conf USERS_CHILD_APPS=$tmp/etc/omarchy/child-apps USERS_CHILD_APPS_DEFAULT=$ROOT/default/omarchy/child-apps
+    export USERS_SHADOW=$tmp/shadow USERS_SUDOERS_DIR=$tmp/etc/sudoers.d USERS_LIFECYCLE_DISPATCH=omarchy-lifecycle-dispatch USERS_REFUSAL_DELAY=0 USERS_SDDM_CONF=$tmp/etc/sddm.conf USERS_CHILD_APPS=$tmp/etc/omarchy/child-apps USERS_CHILD_APPS_DEFAULT=$ROOT/default/omarchy/child-apps USERS_RATE_DIR=$tmp/run/rate
     mkdir -p "$USERS_SUDOERS_DIR"
     source "$ROOT/bin/omarchy-user-functions"
     users_load_drive
@@ -513,3 +513,25 @@ if select_login 2>/dev/null; then
   fail "an autologin in sddm.conf on a machine with two people stops SDDM instead of opening the owner's desktop"
 fi
 pass "an autologin in /etc/sddm.conf, which no drop-in outranks, stops SDDM rather than open the owner's desktop"
+
+# --- A grown-up's password on a child's lock screen ---
+
+fake logger <<'SH'
+#!/bin/bash
+echo "$*" >>"$TEST_TMP/logger"
+SH
+
+reset_system
+users users_add dhh child emma kidpass ownerpw 2>/dev/null
+users users_adult_check emma ownerpw 2>/dev/null || fail "an adult's password opens a child's lock screen"
+grep -q "dhh's password unlocked emma's session" "$tmp/logger" || fail "an adult's unlock is logged"
+if users users_adult_check emma kidpass 2>/dev/null; then fail "the child's own password is not a grown-up's"; fi
+if users users_adult_check dhh ownerpw 2>/dev/null; then fail "an adult's session does not take another adult's password through this"; fi
+pass "a child's lock screen opens with any adult's password, logged, and only a child's"
+
+for i in 1 2 3 4 5; do users users_adult_check emma "guess$i" 2>/dev/null && fail "a wrong guess is refused"; done
+if users users_adult_check emma ownerpw 2>/dev/null; then fail "five misses lock out even the right password for a while"; fi
+printf '0 0\n' >"$tmp/run/rate/adult-check-1001"
+users users_adult_check emma ownerpw 2>/dev/null || fail "once the lockout is over the right password works"
+[[ ! -f $tmp/run/rate/adult-check-1001 ]] || fail "a success clears the count"
+pass "five wrong grown-up passwords lock a child's lock screen out of that path for a while"

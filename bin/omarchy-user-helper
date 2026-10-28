@@ -2,7 +2,7 @@
 
 # omarchy:hidden=true
 # omarchy:summary=Add, delete and change the password of people's accounts, as root
-# omarchy:args=list | add adult|child NAME | password NAME | password-self | delete NAME [--delete-home] | finish
+# omarchy:args=list | add adult|child NAME | password NAME | password-self | adult-check | delete NAME [--delete-home] | finish
 # omarchy:requires-sudo=true
 
 # A child reaches this through a NOPASSWD grant for password-self, so it starts
@@ -34,7 +34,7 @@ unset "${!USERS_@}"
 source "${security_entrypoint%/*}/omarchy-user-functions" || exit 126
 
 usage() {
-  echo "Usage: omarchy-user-helper list | add adult|child NAME | password NAME | password-self | delete NAME [--delete-home] | finish" >&2
+  echo "Usage: omarchy-user-helper list | add adult|child NAME | password NAME | password-self | adult-check | delete NAME [--delete-home] | finish" >&2
   echo "Passwords are read from stdin, one per line: your own first, then the new one." >&2
   exit 64
 }
@@ -95,6 +95,11 @@ case $command in
     fi
     read_password caller_password || usage
     with_lock users_delete "$caller" "$1" "$caller_password" "$delete_home"
+    ;;
+  adult-check)
+    (( $# == 0 )) || usage
+    read_password caller_password || usage
+    users_adult_check "$caller" "$caller_password"
     ;;
   finish)
     (( $# == 0 )) || usage

@@ -107,6 +107,23 @@ if [[ ! -f $fast_signature_file ]] || ! cmp -s "$fast_signature_file" <(printf '
   printf '%s' "$fast_signature" >"$fast_signature_file"
 fi
 
+# A child's picker offers only the kids themes, or every theme while none of
+# them is installed.
+if [[ " $(id -nG) " == *" omarchy-child "* ]]; then
+  child_preview_dir="$CACHE_PATH/child-previews"
+  rm -rf "$child_preview_dir"
+  mkdir -p "$child_preview_dir"
+  while read -r theme; do
+    [[ -z $theme || $theme == \#* ]] && continue
+    for preview in "$preview_dir/$theme".*; do
+      [[ -e $preview ]] && ln -s "$preview" "$child_preview_dir/${preview##*/}"
+    done
+  done <"$OMARCHY_PATH/default/omarchy/child-themes"
+  if compgen -G "$child_preview_dir/*" >/dev/null; then
+    preview_dir=$child_preview_dir
+  fi
+fi
+
 current_theme=$(cat "$HOME/.local/state/omarchy/current/theme.name" 2>/dev/null)
 selected_preview=""
 for extension in png jpg jpeg webp gif bmp mp4 m4v mov webm mkv avi; do

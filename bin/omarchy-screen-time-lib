@@ -124,7 +124,7 @@ def sanitize_config:
     profiles: $profiles,
     users: (($raw.users // {}) | if type == "object" then . else {} end
       | with_entries(select(.key | test("^[a-z_][a-z0-9_-]{0,31}$")))
-      | map_values({profile: (if (type == "object") and ($profiles | has(.profile // "")) then .profile else $active end)}))
+      | map_values(. as $entry | {profile: (if ($entry | type) == "object" and ($profiles | has($entry.profile // "")) then $entry.profile else $active end)}))
   };
 
 def profile_for($user):
@@ -163,7 +163,7 @@ st_jq() {
 st_now() { date +%s; }
 st_uptime() { cut -d' ' -f1 /proc/uptime | cut -d. -f1; }
 st_day_key() { date -d "@${1:-$(st_now)}" +%F; }
-st_weekday_key() { date -d "@${1:-$(st_now)}" +%a | tr '[:upper:]' '[:lower:]'; }
+st_weekday_key() { LC_ALL=C date -d "@${1:-$(st_now)}" +%a | tr '[:upper:]' '[:lower:]'; }
 st_yesterday_key() { st_weekday_key "$(( ${1:-$(st_now)} - 86400 ))"; }
 st_moment() { date -d "@${1:-$(st_now)}" +%H:%M; }
 
@@ -498,9 +498,13 @@ st_lock_session() {
     "$OMARCHY_SCREEN_TIME_LOCK_COMMAND" "$uid" "$sid" && echo "$OMARCHY_SCREEN_TIME_LOCK_COMMAND"
     return
   fi
-  if st_as_user "$uid" omarchy-shell lock lock >/dev/null 2>&1; then
-    echo "omarchy-shell lock"
-  fi
+  # The shell answers ok only when it locked; missing-pam and failed are
+  # answers too, and exit zero. A shell not the real one is not believed.
+  local reply
+  st_shell_trusted "$uid" || return 0
+  reply=$(st_as_user "$uid" omarchy-shell lock lock 2>/dev/null) || return 0
+  [[ $reply == "ok" ]] && echo "omarchy-shell lock"
+  return 0
 }
 
 st_terminate_session() {

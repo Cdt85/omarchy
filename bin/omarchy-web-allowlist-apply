@@ -87,10 +87,15 @@ ruleset() {
   echo "  }"
   echo "  chain output_filter {"
   echo "    type filter hook output priority 0;"
+  # Each resolver answers its own person alone: anyone else asking its port
+  # directly would get the sites on another child's list.
   while read -r user uid; do
     [[ -n $user ]] || continue
+    port=$(port_for "$uid")
     echo "    meta skuid $uid tcp dport 853 drop"
     echo "    meta skuid $uid udp dport 853 drop"
+    echo "    ip daddr 127.0.0.1 udp dport $port meta skuid != $uid drop"
+    echo "    ip daddr 127.0.0.1 tcp dport $port meta skuid != $uid drop"
   done <<<"$enabled"
   echo "  }"
   echo "}"

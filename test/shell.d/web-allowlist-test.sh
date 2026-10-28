@@ -70,6 +70,7 @@ pass "a person with their list on gets a resolver answering only the valid domai
 
 grep -q 'meta skuid 1001 udp dport 53 redirect to :21001' "$tmp/ruleset" || fail "their DNS is redirected by uid" "$(cat "$tmp/ruleset")"
 grep -q 'meta skuid 1001 tcp dport 853 drop' "$tmp/ruleset" || fail "their DNS-over-TLS is dropped"
+grep -q 'ip daddr 127.0.0.1 udp dport 21001 meta skuid != 1001 drop' "$tmp/ruleset" || fail "their resolver answers them alone" "$(cat "$tmp/ruleset")"
 ! grep -q 'skuid 1002' "$tmp/ruleset" || fail "someone whose list is off is left alone"
 grep -qx "\-m u:emma:--- -- $tmp/socket" "$tmp/setfacl" || fail "resolved's socket is denied to them" "$(cat "$tmp/setfacl")"
 grep -qx "\-x u:zoe -- $tmp/socket" "$tmp/setfacl" || fail "and given back to someone whose list is off"

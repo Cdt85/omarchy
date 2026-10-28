@@ -528,7 +528,7 @@ users_add() {
   users_ensure_wheel_grant || return 1
   getent group "$groups" >/dev/null || groupadd -r "$groups" || return 1
 
-  users_journal_put op add user "$name" uuid "$USERS_UUID" slot "$slot" phase account || return 1
+  users_journal_put op add user "$name" role "$role" uuid "$USERS_UUID" slot "$slot" phase account || return 1
   useradd -m -G "$groups" -s /bin/bash "$name" || { users_finish; return 1; }
   users_journal_put old_fp "$(users_fingerprint "$name")" phase key || return 1
   if [[ $slot != "-" ]] && ! users_add_slot "$slot" "$caller_password" "$password"; then
@@ -540,17 +540,22 @@ users_add() {
   users_journal_put phase shadow || return 1
   users_finish || return 1
   users_ensure_boot_records_slot
-  # A child is under screen time from the start, with its default limits, for
-  # the grown-ups to change from the screen time panel.
-  if [[ $role == "child" ]]; then
-    "$USERS_SCREEN_TIME_ADMIN" on >/dev/null && "$USERS_SCREEN_TIME_ADMIN" add "$name" >/dev/null ||
-      users_say "Added $name, but could not put them under screen time."
-  fi
-  # A child starts with the shipped list of apps a child neither sees nor
-  # runs, for the grown-ups to change under Setup > Users.
-  if [[ $role == "child" && -f $USERS_BLOCKED_DEFAULT ]]; then
-    grep -v '^#' "$USERS_BLOCKED_DEFAULT" | users_write_blocked "$name" && "$USERS_APPS_APPLY" ||
-      users_say "Added $name, but could not block the apps a child starts without."
+}
+
+# What a child starts with, done inside the add's journal so an interrupted
+# add finishes it too: screen time with its default limits, and the shipped
+# apps a child neither sees nor runs. Both for the grown-ups to change later.
+users_setup_child() {
+  local name=$1
+  "$USERS_SCREEN_TIME_ADMIN" on >/dev/null && "$USERS_SCREEN_TIME_ADMIN" add "$name" >/dev/null || {
+    users_say "Could not put $name under screen time."
+    return 1
+  }
+  if [[ ! -f $USERS_BLOCKED_DIR/$name && -f $USERS_BLOCKED_DEFAULT ]]; then
+    grep -v '^#' "$USERS_BLOCKED_DEFAULT" | users_write_blocked "$name" && "$USERS_APPS_APPLY" || {
+      users_say "Could not block the apps a child starts without for $name."
+      return 1
+    }
   fi
 }
 
@@ -608,7 +613,7 @@ users_password() {
 }
 
 users_delete() {
-  local caller=$1 name=$2 caller_password=$3 delete_home=$4 adults slot
+  local caller=$1 name=$2 caller_password=$3 delete_home=$4 adults slot handoff
   users_exists "$name" || { users_say "There is no user named $name."; return 1; }
   users_authenticate "$caller" "$caller_password" || return 1
   users_require_adult "$caller" || return 1
@@ -623,12 +628,16 @@ users_delete() {
   fi
   users_adopt_root_holder "$caller" "$caller_password" || return 1
   # Root is handed over before anything is removed, so it never keeps a
-  # deleted person's password.
-  if [[ $(users_root_holder) == "$name" ]]; then
-    users_set_passwords "$caller_password" root && users_set_root_holder "$caller" || return 1
-  fi
+  # deleted person's password, and journaled first, so a run that stops part
+  # way is finished with root locked rather than with the holder file wrong.
+  handoff=-
+  [[ $(users_root_holder) != "$name" ]] || handoff=$caller
   slot=$(users_map_slot "$name")
-  users_journal_put op delete user "$name" uid "$(id -u -- "$name")" uuid "$USERS_UUID" slot "${slot:--}" home "$delete_home" phase remove || return 1
+  users_journal_put op delete user "$name" uid "$(id -u -- "$name")" uuid "$USERS_UUID" slot "${slot:--}" home "$delete_home" root_to "$handoff" phase handoff || return 1
+  if [[ $handoff != "-" ]]; then
+    users_set_passwords "$caller_password" root && users_set_root_holder "$caller" || { users_finish; return 1; }
+  fi
+  users_journal_put phase remove || return 1
   users_finish
 }
 
@@ -684,6 +693,9 @@ users_finish() {
       if [[ $slot != "-" ]]; then
         users_map_set "$user" "$slot" || return 1
       fi
+      if [[ $(users_journal_get role) == "child" ]]; then
+        users_setup_child "$user" || return 1
+      fi
       users_journal_clear
       ;;
     password:key)
@@ -706,6 +718,19 @@ users_finish() {
         fi
       fi
       users_journal_clear
+      ;;
+    delete:handoff)
+      # Whether root took the new holder's password is not known, and this run
+      # never had it: root is locked until that holder's next password change,
+      # which sets it again.
+      local root_to
+      root_to=$(users_journal_get root_to)
+      if [[ $root_to != "-" ]]; then
+        usermod -L root && users_set_root_holder "$root_to" || return 1
+        users_say "Root's password was locked while handing it to $root_to; it returns with their next password change."
+      fi
+      users_journal_put phase remove && users_finish
+      return
       ;;
     delete:remove)
       # Locked first, so nobody can sign in again while the rest goes.

@@ -64,7 +64,11 @@ check_password() {
   # Agreement mode has nothing to gate: no budget, no grants, and an
   # agreement meant to be written together.
   password_checked=false
-  [[ $together == true && ${1:-} != --always ]] && return 0
+  password_skipped=false
+  if [[ $together == true && ${1:-} != --always ]]; then
+    password_skipped=true
+    return 0
+  fi
   USERS_RETRY_IN=0
   users_adult_check "$user" "$password" 2>/dev/null && { password_checked=true; return 0; }
   if ((USERS_RETRY_IN > 0)); then
@@ -87,6 +91,10 @@ with_day() {
 
 edit_day() {
   local filter=$1 day rt result
+  if ! still_agreed; then
+    jq -nc '{ok: false, error: "bad_password"}'
+    return 1
+  fi
   day=$(st_load_day "$uid" "$daykey" "$budget" "$key")
   rt=$(st_load_runtime "$uid")
   result=$(st_jq -n --argjson day "$day" --argjson rt "$rt" --argjson now "$now" --argjson profile "$profile" \
@@ -236,14 +244,18 @@ config_write() {
 }
 
 # Under the state lock, against the config as it is now rather than as it was
-# before the request's stdin closed: a patch let through without a password
+# before the request's stdin closed: a request let through without a password
 # because the profile was in agreement mode is refused if a grown-up has
 # switched it to limits since.
+still_agreed() {
+  [[ ${password_skipped:-false} != true ]] && return 0
+  [[ $(st_config | st_jq --arg u "$user" 'profile_for($u).profile.philosophy == "together"') == true ]]
+}
+
 commit_config() {
   local mode=$1 incoming=$2 current merged
   current=$(st_config)
-  if [[ $password_checked != true ]] &&
-    [[ $(st_jq --arg u "$user" 'profile_for($u).profile.philosophy == "together"' <<<"$current") != true ]]; then
+  if ! still_agreed; then
     echo bad_password
     return 1
   fi

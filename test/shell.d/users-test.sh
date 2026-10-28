@@ -634,3 +634,23 @@ users users_password emma emma kidpass3 kidpass2 2>/dev/null || fail "a third ch
 expect_refused "a fourth try in an hour is refused" "three password changes this hour" users_password emma emma kidpass4 kidpass3
 users users_password dhh emma reset123 ownerpw 2>/dev/null || fail "a grown-up still resets a child's password"
 pass "a child's own password changes are three an hour, refused tries included, so they test nobody's password quickly"
+
+# --- Recovery finishes what an add or a delete left ---
+
+reset_system
+printf '#!/bin/bash\n[[ -n ${TEST_FAIL_SETUP:-} ]] && exit 1\necho "$*" >>"$TEST_TMP/screen-time"\n' >"$tmp/bin/fake-screen-time"
+TEST_FAIL_SETUP=1 users users_add dhh child emma kidpass ownerpw 2>/dev/null && fail "an add whose child setup fails reports it"
+[[ -f $tmp/var/journal ]] || fail "the unfinished child setup stays journaled"
+users users_finish 2>"$tmp/err" || fail "a later run finishes the child's setup" "$(cat "$tmp/err")"
+[[ $(cat "$tmp/screen-time") == $'on\nadd emma' && -f $tmp/etc/omarchy/blocked-apps/emma && ! -f $tmp/var/journal ]] ||
+  fail "a recovered add leaves the child under screen time with their blocked apps"
+pass "an add stopped after the child's password still ends with their screen time and blocked apps"
+
+reset_system
+users users_add dhh adult bob bobpass1 ownerpw 2>/dev/null
+mkdir -p "$tmp/var"
+printf 'op=delete\nuser=dhh\nuid=1000\nuuid=uuid-root\nslot=0\nhome=no\nroot_to=bob\nphase=handoff\n' >"$tmp/var/journal"
+users users_finish 2>/dev/null || fail "a delete stopped mid-handoff is finished"
+grep -qx -- '-L root' "$tmp/usermod" || fail "root is locked when its handoff is in doubt"
+[[ $(cat "$tmp/etc/omarchy/users/root") == "bob" ]] && ! getent passwd dhh >/dev/null || fail "the holder is the adult who deleted, and the delete finishes"
+pass "a delete stopped mid-handoff locks root, names the new holder, and finishes"

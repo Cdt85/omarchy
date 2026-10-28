@@ -202,3 +202,18 @@ wait "$held"
 [[ $(jq -r .error "$tmp_dir/held.out") == bad_password ]] || fail "a held agreement-mode patch is refused once the profile is limits" "$(cat "$tmp_dir/held.out")"
 [[ $(st_config | st_jq -r --arg u kid 'profile_for($u).profile.philosophy') == limits ]] || fail "the grown-up's switch to limits stands"
 pass "a patch let in by agreement mode and held open is refused if a grown-up switched to limits meanwhile"
+
+# The same for an action on the day: a pause let in by agreement mode and held
+# open is refused once the profile is limits.
+write_config together
+rm -f "$fifo"; mkfifo "$fifo"
+ctl pause <"$fifo" >"$tmp_dir/held.out" &
+held=$!
+exec {hold}>"$fifo"
+sleep 1
+write_config limits
+printf '\n' >&$hold
+exec {hold}>&-
+wait "$held"
+[[ $(jq -r .error "$tmp_dir/held.out") == bad_password ]] || fail "a held agreement-mode pause is refused once the profile is limits" "$(cat "$tmp_dir/held.out")"
+pass "a pause let in by agreement mode and held open is refused if a grown-up switched to limits meanwhile"

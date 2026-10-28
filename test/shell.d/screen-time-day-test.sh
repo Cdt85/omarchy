@@ -94,3 +94,17 @@ PATH="$fake_ss_dir:$PATH" OMARCHY_SCREEN_TIME_SHELL_EXE=$(readlink -e /proc/$$/e
 PATH="$fake_ss_dir:$PATH" st_shell_trusted 1002 || fail "another account's sockets are not this one's concern"
 rm -rf "$fake_ss_dir"
 pass "a 'locked' answer counts only from the real Quickshell on the account's socket"
+
+# A child's chosen profile survives sanitizing, whichever profile is active.
+kept=$(st_jq -r -n '{active_profile: "young", profiles: {young: {}, older: {}}, users: {emma: {profile: "older"}, liam: {profile: "gone"}}} | sanitize_config | .users | [.emma.profile, .liam.profile] | join(",")')
+[[ $kept == "older,young" ]] || fail "each account keeps its own profile, and an unknown one falls back to the active" "$kept"
+pass "sanitizing keeps each account's own profile"
+
+# The weekday key is English whatever the locale, as the config's keys are:
+# a date that answers in French unless asked in the C locale stands in.
+french_date=$(mktemp -d)
+printf '#!/bin/bash\n[[ ${LC_ALL:-} == C ]] && echo Thu || echo jeu.\n' >"$french_date/date"
+chmod +x "$french_date/date"
+[[ $(PATH="$french_date:$PATH" st_weekday_key 0) == "thu" ]] || fail "the weekday key ignores the locale"
+rm -rf "$french_date"
+pass "the weekday key ignores the locale"

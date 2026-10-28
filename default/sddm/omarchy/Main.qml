@@ -7,8 +7,29 @@ Rectangle {
   height: 480
   color: "#1a1b26"
 
-  property string currentUser: userModel.lastUser
+  // With more than one account the screen names whose password it asks for,
+  // and the arrow keys switch accounts; only the account shown is ever tried,
+  // so a typo never counts against anyone else's failed-login limit.
+  property int userIndex: Math.max(0, userModel.lastIndex)
+  property string currentUser: userNames.count > 0 && userNames.itemAt(userIndex) ? userNames.itemAt(userIndex).userName : userModel.lastUser
   property bool loginFailed: false
+
+  function switchUser(step) {
+    if (userNames.count < 2)
+      return
+    userIndex = (userIndex + step + userNames.count) % userNames.count
+    password.text = ""
+    loginFailed = false
+  }
+
+  Repeater {
+    id: userNames
+    model: userModel
+
+    Item {
+      property string userName: model.name
+    }
+  }
   property int sessionIndex: {
     for (var i = 0; i < sessionModel.rowCount(); i++) {
       var name = (sessionModel.data(sessionModel.index(i, 0), Qt.DisplayRole) || "").toString()
@@ -40,6 +61,15 @@ Rectangle {
       width: Math.min(sourceSize.width, root.width * 0.8)
       height: sourceSize.width > 0 ? Math.round(width * sourceSize.height / sourceSize.width) : 0
       fillMode: Image.PreserveAspectFit
+      anchors.horizontalCenter: parent.horizontalCenter
+    }
+
+    Text {
+      text: "\u2039  " + root.currentUser + "  \u203a"
+      visible: userNames.count > 1
+      color: "#a9b1d6"
+      font.family: "JetBrainsMono Nerd Font"
+      font.pixelSize: 22
       anchors.horizontalCenter: parent.horizontalCenter
     }
 
@@ -104,6 +134,12 @@ Rectangle {
           Keys.onPressed: {
             if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
               sddm.login(root.currentUser, password.text, root.sessionIndex)
+              event.accepted = true
+            } else if (event.key === Qt.Key_Left || event.key === Qt.Key_Backtab) {
+              root.switchUser(-1)
+              event.accepted = true
+            } else if (event.key === Qt.Key_Right || event.key === Qt.Key_Tab) {
+              root.switchUser(1)
               event.accepted = true
             }
           }

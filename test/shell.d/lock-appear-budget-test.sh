@@ -36,7 +36,7 @@ appear_ms() {
 # included: utime and stime, the 14th and 15th fields of its stat.
 scratch_cpu_ticks() {
   local stat fields
-  stat=$(</proc/"$SCRATCH_PID"/stat)
+  stat=$(</proc/"$SCRATCH_PID"/stat) || return 1
   read -r -a fields <<<"${stat##*) }"
   echo $(( fields[11] + fields[12] ))
 }
@@ -47,15 +47,16 @@ scratch_cpu_ticks() {
 # for those frames. Wait until the shell uses at most one tick of CPU in
 # 200ms, for at most 10s, so only the lock is timed.
 wait_scratch_quiet() {
-  local last now
-  last=$(scratch_cpu_ticks)
-  for _ in {1..50}; do
-    sleep 0.2
-    now=$(scratch_cpu_ticks)
-    if (( now - last <= 1 )); then
+  local last="" now
+  for _ in {0..50}; do
+    if ! now=$(scratch_cpu_ticks); then
+      sed -n '1,120p' "$SCRATCH_LOG" >&2
+      fail "scratch shell keeps running while it settles"
+    elif [[ -n $last ]] && (( now - last <= 1 )); then
       return 0
     else
       last=$now
+      sleep 0.2
     fi
   done
 }

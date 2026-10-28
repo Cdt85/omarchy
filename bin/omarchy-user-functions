@@ -782,25 +782,34 @@ users_themes() {
 
 # --- A grown-up's password on a child's lock screen ------------------------------
 
-# A child's lock screen accepts any adult's password too, so a parent can get
-# into a child's locked session (to set their screen time, say). Answered only
-# for a child, one attempt at a time, and after five misses not at all for two
+# A child's lock screen, and the screen time controls in their session, accept
+# any adult's password, so a parent can get into a child's locked session or
+# hand out minutes. This is the one check both use. Answered only for a child, one attempt at a time, and after five misses not at all for two
 # minutes, doubling up to an hour, so it is no cheaper a guess than the login
 # screen. Every answer goes to the auth log.
 users_adult_check() {
-  local caller=$1 password=$2 uid state fd failures=0 until=0 now adult wait
+  local caller=$1 password=$2 uid fd status=0
   if [[ $(users_role "$caller") != "child" ]]; then
     users_say "Only a child's lock screen takes a grown-up's password."
     return 1
   fi
   uid=$(id -u -- "$caller") || return 1
   mkdir -p "$USERS_RATE_DIR" && chmod 700 "$USERS_RATE_DIR" || return 1
+  exec {fd}>>"$USERS_RATE_DIR/adult-check-$uid.lock" && flock -x "$fd" || return 1
+  users_adult_check_locked "$caller" "$password" "$uid" || status=$?
+  exec {fd}>&-
+  return "$status"
+}
+
+users_adult_check_locked() {
+  local caller=$1 password=$2 uid=$3 state failures=0 until=0 now adult wait
   state=$USERS_RATE_DIR/adult-check-$uid
-  exec {fd}>>"$state.lock" && flock -x "$fd" || return 1
   [[ -f $state ]] && read -r failures until <"$state"
   [[ $failures =~ ^[0-9]+$ && $until =~ ^[0-9]+$ ]] || { failures=0; until=0; }
   now=$(date +%s)
+  USERS_RETRY_IN=0
   if (( until > now )); then
+    USERS_RETRY_IN=$(( until - now ))
     logger -p auth.notice -t omarchy-user-helper "refused a grown-up's password on $caller's lock screen: locked out" 2>/dev/null || true
     sleep "$USERS_REFUSAL_DELAY"
     return 1
@@ -809,6 +818,9 @@ users_adult_check() {
   for adult in $(users_adults); do
     if users_password_matches "$password" "$adult"; then
       rm -f "$state"
+      # When, for screen time: an unlock at zero by a grown-up earns the room
+      # to hand out minutes, one by the child does not.
+      date +%s >"$USERS_RATE_DIR/adult-unlock-$uid"
       logger -p auth.notice -t omarchy-user-helper "$adult's password unlocked $caller's session" 2>/dev/null || true
       return 0
     fi

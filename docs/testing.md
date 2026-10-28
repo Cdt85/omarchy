@@ -129,7 +129,8 @@ compositor.
 the result into `node`. The prelude mirrors the bash assertion protocol
 (`pass`, `fail`, `assert`, `assertEqual`, `assertDeepEqual` — same
 `ok`/`not ok` lines, same exit-on-first-failure) and provides `root` (from the
-exported `ROOT`), `path`, and `requireFromRoot(relativePath)`:
+exported `ROOT`), `path`, and `requireFromRoot(relativePath)`, which loads a
+`shell/` path through that loader and anything else with `require`:
 
 ```bash
 run_node_test <<'JS'

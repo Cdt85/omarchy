@@ -73,6 +73,12 @@ cat >"$stub_bin/prlimit" <<'STUB'
 pid=${2:?} limit=${3#--rttime=}
 echo "prlimit $pid" >>"$CALLS"
 sed -i "s/^Max realtime timeout .*/Max realtime timeout ${limit%:*} ${limit#*:} us/" "$OMARCHY_PROC_ROOT/$pid/limits"
+# An app that keeps starting clients at the stale portal's zero.
+if [[ -n ${ZEROS_KEEP_COMING:-} ]]; then
+  next=$(( $(cat "$STATE/spawned" 2>/dev/null || echo 100) + 1 ))
+  echo "$next" >"$STATE/spawned"
+  fake-proc "$next" 1000 "${next}00" 0 0
+fi
 STUB
 cat >"$stub_bin/busctl" <<'STUB'
 #!/bin/bash
@@ -476,6 +482,14 @@ repair || fail "the next run with sudo succeeds" "$(cat "$test_dir/out")"
 [[ ! -e $state/rtkit-masked && ! -e $state/pending ]] ||
   fail "the next run with sudo releases rtkit and finishes"
 pass "a mask left by expired sudo says so, and the next run with sudo releases it"
+
+# An app that keeps starting clients at a zero stops the repair before rtkit
+# lands, and the error says how to finish it.
+fresh_machine
+if ZEROS_KEEP_COMING=1 repair; then fail "the repair fails while zeros keep coming"; fi
+[[ ! -e $state/rtkit ]] && grep -q "close the apps that keep starting them, then run the update again" "$test_dir/out" ||
+  fail "while zeros keep coming, rtkit is not installed and the error says how to finish" "$(cat "$test_dir/out")"
+pass "while zeros keep coming, rtkit is not installed and the error says how to finish"
 
 # Two users' updates at once: the second waits for the first, instead of
 # failing on pacman's lock and releasing rtkit in the middle of its install.

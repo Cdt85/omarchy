@@ -113,7 +113,7 @@ raise_zero_budgets() {
       done' <<<"$targets" || fail "Could not raise the realtime budget of every process"
   done
 
-  fail "Processes still start with a zero realtime budget: $(zero_rttime_processes | awk '{ printf "%s ", $1 }')"
+  fail "Processes keep starting with a zero realtime budget (PIDs $(zero_rttime_processes | awk '{ printf "%s ", $1 }')); close the apps that keep starting them, then run the update again."
 }
 
 as_user() {

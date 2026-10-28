@@ -121,6 +121,20 @@ STUB
 cat >"$stub_bin/pacman" <<'STUB'
 #!/bin/bash
 [[ $* == "-S --needed --noconfirm -- rtkit" ]] || exit 2
+# pacman's own lock: a second transaction fails at once instead of waiting.
+if [[ -e $STATE/db.lck ]]; then
+  echo "error: failed to init transaction (unable to lock database)" >&2
+  exit 1
+fi
+touch "$STATE/db.lck"
+trap 'rm -f "$STATE/db.lck"' EXIT
+# Hold the transaction until another repair says it waits, or for 10 s.
+if [[ -n ${PACMAN_HOLD_FOR:-} ]]; then
+  for _ in {1..100}; do
+    ! grep -q "Waiting for another realtime repair" "$PACMAN_HOLD_FOR" 2>/dev/null || break
+    sleep 0.1
+  done
+fi
 [[ -e $STATE/rtkit-masked ]] || echo "rtkit installed unmasked" >>"$CALLS"
 [[ -z ${PACMAN_FAILS:-} ]] || exit 1
 # rtkit can make any user's zero-limit thread realtime from here on.
@@ -176,8 +190,9 @@ python3 -c 'import socket, sys; socket.socket(socket.AF_UNIX).bind(sys.argv[1])'
 repair() {
   XDG_RUNTIME_DIR=${run_runtime_dir:-$runtime_dir} DBUS_SESSION_BUS_ADDRESS='' \
     OMARCHY_PROC_ROOT=$proc_root OMARCHY_REALTIME_REPAIR_PENDING=$state/pending \
+    OMARCHY_REALTIME_REPAIR_LOCK=$state/lock \
     STATE=$state CALLS=$calls RTKIT_BUDGET=200000 MY_UID=${run_uid:-$my_uid} ME=${run_user:-$me} \
-    PATH="$stub_bin:$ROOT/bin:$PATH" "$repair_command" >"$test_dir/out" 2>&1
+    PATH="$stub_bin:$ROOT/bin:$PATH" "$repair_command" >"${run_out:-$test_dir/out}" 2>&1
 }
 
 hard_of() {
@@ -461,3 +476,32 @@ repair || fail "the next run with sudo succeeds" "$(cat "$test_dir/out")"
 [[ ! -e $state/rtkit-masked && ! -e $state/pending ]] ||
   fail "the next run with sudo releases rtkit and finishes"
 pass "a mask left by expired sudo says so, and the next run with sudo releases it"
+
+# Two users' updates at once: the second waits for the first, instead of
+# failing on pacman's lock and releasing rtkit in the middle of its install.
+fresh_machine
+PACMAN_HOLD_FOR=$test_dir/out-second repair &
+first=$!
+for _ in {1..50}; do
+  [[ ! -e $state/db.lck ]] || break
+  sleep 0.1
+done
+[[ -e $state/db.lck ]] || fail "the first repair reaches its install" "$(cat "$test_dir/out")"
+second=0
+run_uid=$other_uid run_user=user2 run_runtime_dir=$test_dir/no-session run_out=$test_dir/out-second repair || second=$?
+first_status=0
+wait "$first" || first_status=$?
+(( first_status == 0 && second == 0 )) ||
+  fail "two repairs at once both succeed" "$first_status $second $(cat "$test_dir/out" "$test_dir/out-second")"
+! grep -qx "rtkit installed unmasked" "$calls" && [[ ! -e $state/rtkit-masked && ! -e $state/pending ]] ||
+  fail "a second repair at once does not release rtkit during the first one's install" "$(cat "$calls")"
+grep -q "Waiting for another realtime repair to finish" "$test_dir/out-second" ||
+  fail "the second repair says it waits" "$(cat "$test_dir/out-second")"
+pass "a second repair at once waits instead of releasing rtkit mid-install"
+
+# With a umask of 077, sudo would create the lock as root's alone, and no
+# user could open it again.
+fresh_machine
+(umask 077 && repair) || fail "the repair succeeds with a umask of 077" "$(cat "$test_dir/out")"
+[[ $(stat -c %a "$state/lock") == "644" ]] || fail "the lock stays readable by every user" "$(stat -c %a "$state/lock")"
+pass "the lock stays readable by every user"

@@ -34,6 +34,7 @@
 
 proc_root=${OMARCHY_PROC_ROOT:-/proc}
 pending=${OMARCHY_REALTIME_REPAIR_PENDING:-/var/lib/omarchy/realtime-repair-pending}
+lock=${OMARCHY_REALTIME_REPAIR_LOCK:-/run/omarchy-realtime-repair.lock}
 
 fail() {
   echo "$1" >&2
@@ -167,6 +168,18 @@ repair_machine() {
   local budget user failed=0
 
   need_sudo
+
+  # Each user's update holds only its own lock, so two users can update at
+  # once. Without this one, a run whose install fails on pacman's lock would
+  # unmask rtkit in the middle of the other run's install. The file is root's,
+  # in a directory only root can write, and every user can open it to lock.
+  # sudo keeps the caller's umask, so the mode is set and the inode kept.
+  sudo -n touch "$lock" && sudo -n chmod 644 "$lock" || fail "Could not create the realtime repair lock"
+  exec {lock_fd}<"$lock" || fail "Could not open the realtime repair lock"
+  if ! flock -n "$lock_fd"; then
+    echo "Waiting for another realtime repair to finish..."
+    flock "$lock_fd" || fail "Could not take the realtime repair lock"
+  fi
 
   # Regular users only: root and system accounts can log in too, but their
   # processes are services, and a zero limit there may be deliberate.

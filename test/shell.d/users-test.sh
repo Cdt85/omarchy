@@ -209,7 +209,7 @@ reset_system() {
 users() {
   (
     export USERS_DIR=$tmp/etc/omarchy/users USERS_JOURNAL=$tmp/var/journal USERS_LOCK=$tmp/run/lock
-    export USERS_SHADOW=$tmp/shadow USERS_SUDOERS_DIR=$tmp/etc/sudoers.d USERS_LIFECYCLE_DISPATCH=omarchy-lifecycle-dispatch USERS_REFUSAL_DELAY=0 USERS_SDDM_CONF=$tmp/etc/sddm.conf USERS_BLOCKED_DIR=$tmp/etc/omarchy/blocked-apps USERS_BLOCKED_DEFAULT=$ROOT/default/omarchy/child-blocked-apps USERS_APPS_APPLY=omarchy-user-apps-apply USERS_RATE_DIR=$tmp/run/rate
+    export USERS_SHADOW=$tmp/shadow USERS_SUDOERS_DIR=$tmp/etc/sudoers.d USERS_LIFECYCLE_DISPATCH=omarchy-lifecycle-dispatch USERS_REFUSAL_DELAY=0 USERS_SDDM_CONF=$tmp/etc/sddm.conf USERS_BLOCKED_DIR=$tmp/etc/omarchy/blocked-apps USERS_BLOCKED_DEFAULT=$ROOT/default/omarchy/child-blocked-apps USERS_APPS_APPLY=omarchy-user-apps-apply USERS_THEME_SETTINGS=$tmp/etc/omarchy/theme-collections USERS_THEME_COLLECTIONS=$ROOT/default/omarchy/theme-collections USERS_RATE_DIR=$tmp/run/rate
     mkdir -p "$USERS_SUDOERS_DIR"
     source "$ROOT/bin/omarchy-user-functions"
     users_load_drive
@@ -557,3 +557,17 @@ users users_delete dhh emma ownerpw yes 2>/dev/null
 [[ ! -e $tmp/etc/omarchy/blocked-apps/emma ]] || fail "a deleted person's blocked list goes with them"
 [[ $(cat "$tmp/apps-applied") == "3" ]] || fail "their ACLs are removed before the account"
 pass "deleting someone takes their blocked list and its ACLs with them"
+
+# --- Theme collections ---
+
+reset_system
+users users_add dhh child emma kidpass ownerpw 2>/dev/null
+printf 'kids\ngeneral\n' | users users_themes dhh emma ownerpw 2>"$tmp/err" || fail "an adult picks a child's theme collections" "$(cat "$tmp/err")"
+[[ $(cat "$tmp/etc/omarchy/theme-collections/emma") == $'general\nkids' ]] || fail "the picked collections are written"
+[[ $(stat -c %a "$tmp/etc/omarchy/theme-collections/emma") == "644" ]] || fail "the child's session can read their collections"
+printf 'kids\n' | users users_themes emma emma kidpass 2>/dev/null && fail "a child can't change their collections"
+printf 'adults-only\n' | users users_themes dhh emma ownerpw 2>/dev/null && fail "only shipped collections can be picked"
+printf '' | users users_themes dhh emma ownerpw 2>/dev/null && fail "at least one collection is picked"
+users users_delete dhh emma ownerpw yes 2>/dev/null
+[[ ! -e $tmp/etc/omarchy/theme-collections/emma ]] || fail "a deleted person's collections go with them"
+pass "only an adult picks someone's theme collections, from those shipped, and they go with the person"

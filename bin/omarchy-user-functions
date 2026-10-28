@@ -25,6 +25,8 @@ fi
 : "${USERS_BLOCKED_DIR:=/etc/omarchy/blocked-apps}"
 : "${USERS_BLOCKED_DEFAULT:=/usr/share/omarchy/default/omarchy/child-blocked-apps}"
 : "${USERS_APPS_APPLY:=/usr/bin/omarchy-user-apps-apply}"
+: "${USERS_THEME_SETTINGS:=/etc/omarchy/theme-collections}"
+: "${USERS_THEME_COLLECTIONS:=/usr/share/omarchy/default/omarchy/theme-collections}"
 
 USERS_SLOT_MAP=$USERS_DIR/slots
 USERS_ROOT_HOLDER=$USERS_DIR/root
@@ -672,6 +674,7 @@ users_finish() {
       if [[ -f $USERS_BLOCKED_DIR/$user ]]; then
         rm -f "$USERS_BLOCKED_DIR/$user" && "$USERS_APPS_APPLY" || return 1
       fi
+      rm -f "$USERS_THEME_SETTINGS/$user" || return 1
       uid=$(users_journal_get uid)
       if [[ $uid =~ ^[0-9]+$ ]]; then
         rm -f "$USERS_SUDOERS_DIR/99-omarchy-nopasswd-$uid" "$USERS_SUDOERS_DIR/99-omarchy-permanent-nopasswd-$uid" || return 1
@@ -721,6 +724,33 @@ users_apps() {
   users_require_adult "$caller" || return 1
   users_write_blocked "$name" || return 1
   "$USERS_APPS_APPLY" || { users_say "Saved $name's blocked apps, but could not stop all of them running."; return 1; }
+}
+
+# --- Theme collections -------------------------------------------------------------
+
+# The collections on stdin (general, or a shipped collection such as kids)
+# become the ones NAME's theme picker offers.
+users_themes() {
+  local caller=$1 name=$2 caller_password=$3 collection tmp
+  local -a picked=()
+  users_exists "$name" || { users_say "There is no user named $name."; return 1; }
+  users_authenticate "$caller" "$caller_password" || return 1
+  users_require_adult "$caller" || return 1
+  while read -r collection; do
+    [[ -z $collection ]] && continue
+    if [[ $collection != "general" && ! ( $collection =~ ^[a-z0-9-]+$ && -f $USERS_THEME_COLLECTIONS/$collection ) ]]; then
+      users_say "There is no theme collection called '$collection'."
+      return 1
+    fi
+    picked+=("$collection")
+  done
+  (( ${#picked[@]} )) || { users_say "Pick at least one theme collection."; return 1; }
+  mkdir -p "$USERS_THEME_SETTINGS" && chmod 755 "$USERS_THEME_SETTINGS" || return 1
+  tmp=$(mktemp "$USERS_THEME_SETTINGS/.$name.XXXXXX") || return 1
+  printf '%s\n' "${picked[@]}" | sort -u >"$tmp" && chmod 644 "$tmp" && mv -f "$tmp" "$USERS_THEME_SETTINGS/$name" || {
+    rm -f "$tmp"
+    return 1
+  }
 }
 
 # --- A grown-up's password on a child's lock screen ------------------------------

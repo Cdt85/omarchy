@@ -252,7 +252,7 @@
   "setup.plugin.remove": {"icon":"󰭌","label":"Remove Plugin","when":"compgen -G \"$HOME/.config/omarchy/plugins/*/manifest.json\"","action":"omarchy-menu-plugin remove"},
   "setup.users": {"icon":"","label":"Users","aliases":["users","password"],"provider":"users"},
   "setup.users.add": {"icon":"","label":"Add","when":"[[ \" $(id -nG) \" == *' wheel '* ]]","action":"omarchy-launch-floating-terminal-with-presentation omarchy-user-add"},
-  "setup.users.apps": {"icon":"󰀻","label":"Child Apps","when":"[[ \" $(id -nG) \" == *' wheel '* && -f /etc/omarchy/child-apps ]]","action":"omarchy-launch-floating-terminal-with-presentation 'sudoedit /etc/omarchy/child-apps'"},
+  "setup.users.apps": {"icon":"󰀻","label":"Child Apps","when":"[[ \" $(id -nG) \" == *' wheel '* && -f /etc/omarchy/child-apps ]]","action":"omarchy-launch-floating-terminal-with-presentation 'SUDO_EDITOR=nvim sudoedit /etc/omarchy/child-apps'"},
   "setup.security": {"icon":"","label":"Security"},
   "setup.config": {"icon":"","label":"Config"},
   "setup.security.fingerprint": {"icon":"󰈷","label":"Fingerprint","when":"omarchy-hw-fingerprint","action":"omarchy-launch-floating-terminal-with-presentation omarchy-setup-security-fingerprint"},

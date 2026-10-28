@@ -108,18 +108,28 @@ if [[ ! -f $fast_signature_file ]] || ! cmp -s "$fast_signature_file" <(printf '
 fi
 
 # A child's picker offers only the kids themes, or every theme while none of
-# them is installed.
+# them is installed. Their previews go in a directory named for its contents,
+# built aside and renamed into place, so a refresh running alongside another
+# finds it whole or builds its own, and never hands over an emptied one.
 if [[ " $(id -nG) " == *" omarchy-child "* ]]; then
-  child_preview_dir="$CACHE_PATH/child-previews"
-  rm -rf "$child_preview_dir"
-  mkdir -p "$child_preview_dir"
+  child_previews=()
   while read -r theme; do
     [[ -z $theme || $theme == \#* ]] && continue
     for preview in "$preview_dir/$theme".*; do
-      [[ -e $preview ]] && ln -s "$preview" "$child_preview_dir/${preview##*/}"
+      [[ -e $preview ]] && child_previews+=("${preview##*/}")
     done
   done <"$OMARCHY_PATH/default/omarchy/child-themes"
-  if compgen -G "$child_preview_dir/*" >/dev/null; then
+
+  if (( ${#child_previews[@]} )); then
+    child_preview_dir="$CACHE_PATH/child-previews-$(printf '%s\n' "${child_previews[@]}" | md5sum | cut -c1-12)"
+    if [[ ! -d $child_preview_dir ]]; then
+      staging=$(mktemp -d "$CACHE_PATH/.child-previews.XXXXXX")
+      for preview in "${child_previews[@]}"; do
+        ln -s "$preview_dir/$preview" "$staging/$preview"
+      done
+      mv -T "$staging" "$child_preview_dir" 2>/dev/null || rm -rf "$staging"
+      find "$CACHE_PATH" -maxdepth 1 -name 'child-previews-*' ! -path "$child_preview_dir" -exec rm -rf {} + 2>/dev/null
+    fi
     preview_dir=$child_preview_dir
   fi
 fi

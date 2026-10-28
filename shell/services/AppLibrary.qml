@@ -21,6 +21,7 @@ Item {
   // their own. It curates the launcher; it does not stop anything running.
   property bool childAccount: false
   property var childAllowedIds: ({})
+  property bool systemChildAppsLoaded: false
   property string systemChildApps: ""
   property string defaultChildApps: ""
 
@@ -59,7 +60,8 @@ Item {
   }
 
   function loadChildAllowed() {
-    var source = root.systemChildApps.length > 0 ? root.systemChildApps : root.defaultChildApps
+    // A grown-up's list, once it exists, is the whole list, even when empty.
+    var source = root.systemChildAppsLoaded ? root.systemChildApps : root.defaultChildApps
     var next = ({})
     var lines = source.split(/\n/)
     for (var i = 0; i < lines.length; i++) {
@@ -269,9 +271,9 @@ Item {
     path: "/etc/omarchy/child-apps"
     watchChanges: true
     printErrors: false
-    onLoaded: { root.systemChildApps = text(); root.loadChildAllowed() }
+    onLoaded: { root.systemChildAppsLoaded = true; root.systemChildApps = text(); root.loadChildAllowed() }
     onFileChanged: reload()
-    onLoadFailed: { root.systemChildApps = ""; root.loadChildAllowed() }
+    onLoadFailed: { root.systemChildAppsLoaded = false; root.systemChildApps = ""; root.loadChildAllowed() }
   }
 
   FileView {

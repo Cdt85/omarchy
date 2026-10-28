@@ -1027,6 +1027,7 @@ Item {
   function openRoute(initialMenu) {
     var id = root.resolveRoute(initialMenu)
     var entry = root.items[id]
+    if (entry && MenuModel.hiddenByGuard(root.items, root.whenResults, entry)) return "hidden"
     // If the resolved id is an action (i.e. the user invoked an alias for
     // a leaf, e.g. `omarchy menu summon screenrecord-stop`), run it directly
     // instead of opening an action with no children.

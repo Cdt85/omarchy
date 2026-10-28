@@ -4,7 +4,7 @@
 
 while read -r theme; do
   [[ -z $theme || $theme == \#* ]] && continue
-  if [[ -d $OMARCHY_PATH/themes/$theme ]]; then
+  if [[ -d $HOME/.config/omarchy/themes/$theme || -d $OMARCHY_PATH/themes/$theme ]]; then
     omarchy-theme-set "$theme"
     exit
   fi

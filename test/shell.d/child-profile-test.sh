@@ -34,7 +34,7 @@ install_theme() {
 }
 
 rows() {
-  rm -rf "$tmp/home/.cache"
+  [[ -n ${KEEP_CACHE:-} ]] || rm -rf "$tmp/home/.cache"
   "$ROOT/bin/omarchy-theme-switcher" --print-rows | paste -sd' ' -
 }
 
@@ -58,3 +58,24 @@ rm -f "$tmp/theme-set"
 TEST_GROUPS="dhh wheel" bash "$ROOT/install/user/first-run/child.sh"
 [[ ! -e $tmp/theme-set ]] || fail "an adult's first login leaves the theme alone"
 pass "a child's first login opens on the first kids theme installed, and an adult's is untouched"
+
+# Two refreshes at once, as the shell's and a CLI's can overlap: every run
+# still hands over only the kids themes.
+export TEST_GROUPS="kid omarchy-child" KEEP_CACHE=1
+rows >/dev/null
+for i in 1 2 3 4 5 6 7 8; do
+  rows >"$tmp/rows.$i" &
+done
+wait
+for i in 1 2 3 4 5 6 7 8; do
+  [[ $(cat "$tmp/rows.$i") == "cozy-night dino-dawn" ]] || fail "overlapping refreshes each offer a child only the kids themes" "$(cat "$tmp/rows.$i")"
+done
+unset KEEP_CACHE
+pass "overlapping theme refreshes never offer a child every theme"
+
+mkdir -p "$tmp/home/.config/omarchy/themes/paper-harbor"
+rm -f "$tmp/theme-set"
+mv "$tmp/omarchy/themes/cozy-night" "$tmp/cozy-night.away"
+bash "$ROOT/install/user/first-run/child.sh"
+[[ $(cat "$tmp/theme-set") == "paper-harbor" ]] || fail "a child's first login finds a kids theme in their own themes" "$(cat "$tmp/theme-set" 2>/dev/null)"
+pass "a child's first login finds kids themes installed in their own themes directory"

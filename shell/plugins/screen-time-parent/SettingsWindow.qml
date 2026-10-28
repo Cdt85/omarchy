@@ -4,6 +4,7 @@ import Quickshell
 import Quickshell.Io
 import qs.Ui
 import qs.Commons
+import qs.Commons as Commons
 
 // The parent's settings, in a window of their own. Changes gather into one
 // partial patch, saved with a grown-up's password at the foot of the window;
@@ -16,10 +17,10 @@ Item {
   property string clientPath: ""
   readonly property bool opened: win.visible
   property string note: ""
-  property color noteColor: Color.foreground
+  property color noteColor: Commons.Color.foreground
 
   readonly property bool lightTheme: {
-    var bg = Color.background
+    var bg = Commons.Color.background
     return (0.299 * bg.r + 0.587 * bg.g + 0.114 * bg.b) > 0.5
   }
   readonly property color okColor: lightTheme ? "#3C7C4E" : "#5FA46B"
@@ -56,8 +57,8 @@ Item {
   readonly property var dayLabels: [1, 2, 3, 4, 5, 6, 0].map(function(d) { return Qt.locale(I18n.formatLocale).dayName(d, Locale.ShortFormat) })
 
   function fadeText(amount) {
-    var c = Color.foreground
-    var bg = Color.background
+    var c = Commons.Color.foreground
+    var bg = Commons.Color.background
     return Qt.rgba(c.r + (bg.r - c.r) * amount,
                    c.g + (bg.g - c.g) * amount,
                    c.b + (bg.b - c.b) * amount, 1)
@@ -194,19 +195,32 @@ Item {
     return out
   }
 
+  // Agreement-mode changes made while a save is still running wait here and
+  // go out together once it answers, rather than being dropped.
+  property var queued: ({})
+
   function patch(obj) {
     if (savedTogether && !dirty) {
-      send(obj, "")
+      if (patchProc.running) queued = merged(queued, obj)
+      else send(obj, "")
       return
     }
     pending = merged(pending, obj)
     note = ""
   }
 
+  function flushQueued() {
+    if (patchProc.running || Object.keys(queued).length === 0) return
+    var next = queued
+    queued = {}
+    patch(next)
+  }
+
   function send(obj, password) {
     if (patchProc.running) return
     patchProc.secret = password
     patchProc.body = obj
+    patchProc.passwordless = password === ""
     patchProc.command = [root.clientPath, "--password-stdin", "config", "patch", JSON.stringify(obj)]
     patchProc.running = true
   }
@@ -265,29 +279,46 @@ Item {
     id: patchProc
     property string secret: ""
     property var body: null
+    property bool passwordless: false
     stdinEnabled: true
     onStarted: {
       write(secret + "\n")
       secret = ""
     }
-    onRunningChanged: if (!running) secret = ""
+    onRunningChanged: {
+      if (running) return
+      secret = ""
+      Qt.callLater(root.flushQueued)
+    }
     stdout: StdioCollector {
       onStreamFinished: {
         var payload
-        try { payload = JSON.parse(text) } catch (e) { return }
+        try { payload = JSON.parse(text) } catch (e) { payload = {} }
         if (payload.ok === true) {
           // A save that worked says nothing: the fields already show it.
           // Changes made while it ran stay pending.
           if (root.pending === patchProc.body) root.pending = {}
           root.note = ""
-        } else if (payload.error === "bad_password") {
+          return
+        }
+        // A change sent without a password that did not land (the mode left
+        // agreement meanwhile, say) waits for one in the foot instead.
+        if (patchProc.passwordless) {
+          root.pending = root.merged(root.merged(patchProc.body, root.pending), root.queued)
+          root.queued = {}
+          if (payload.error === "bad_password") {
+            root.note = ""
+            return
+          }
+        }
+        if (payload.error === "bad_password") {
           root.note = I18n.t("screenTime.notAdultPassword")
           root.noteColor = root.errColor
         } else if (payload.error === "locked_out") {
           root.note = I18n.t("screenTime.tooManyTries").arg(payload.retry_in_seconds)
           root.noteColor = root.errColor
         } else {
-          root.note = String(payload.error || "failed")
+          root.note = payload.error ? String(payload.error) : I18n.t("screenTime.failed")
           root.noteColor = root.errColor
         }
       }
@@ -335,7 +366,7 @@ Item {
           root.note = I18n.t("screenTime.tooManyTries").arg(payload.retry_in_seconds)
           root.noteColor = root.errColor
         } else {
-          root.note = String(payload.error || "failed")
+          root.note = payload.error ? String(payload.error) : I18n.t("screenTime.failed")
           root.noteColor = root.errColor
         }
       }
@@ -356,7 +387,7 @@ Item {
 
     PanelSectionHeader {
       id: headTitle
-      foreground: Color.foreground
+      foreground: Commons.Color.foreground
     }
 
     Text {
@@ -413,7 +444,7 @@ Item {
           Rectangle {
             anchors.fill: parent
             color: cell.on
-              ? Qt.rgba(Color.accent.r, Color.accent.g, Color.accent.b, cellArea.containsMouse ? 0.3 : 0.22)
+              ? Qt.rgba(Commons.Color.accent.r, Commons.Color.accent.g, Commons.Color.accent.b, cellArea.containsMouse ? 0.3 : 0.22)
               : (cellArea.containsMouse ? root.fadeText(0.9) : "transparent")
             Behavior on color { ColorAnimation { duration: Style.duration(100) } }
           }
@@ -432,14 +463,14 @@ Item {
             anchors.fill: parent
             color: "transparent"
             border.width: 1
-            border.color: Color.accent
+            border.color: Commons.Color.accent
           }
 
           Text {
             textFormat: Text.PlainText
             anchors.centerIn: parent
             text: String(picker.labels[cell.index])
-            color: cell.on ? Color.foreground : root.fadeText(0.45)
+            color: cell.on ? Commons.Color.foreground : root.fadeText(0.45)
             font.family: Style.font.family
             font.pixelSize: Style.font.body
             font.bold: cell.on
@@ -499,7 +530,7 @@ Item {
           Rectangle {
             anchors.fill: parent
             color: number.activeFocus
-              ? Qt.rgba(Color.accent.r, Color.accent.g, Color.accent.b, 0.18)
+              ? Qt.rgba(Commons.Color.accent.r, Commons.Color.accent.g, Commons.Color.accent.b, 0.18)
               : (cellArea.containsMouse ? root.fadeText(0.9) : "transparent")
             Behavior on color { ColorAnimation { duration: Style.duration(100) } }
           }
@@ -531,9 +562,9 @@ Item {
               width: cell.width - Style.space(8)
               horizontalAlignment: TextInput.AlignHCenter
               text: String(Number(bar.values[cell.field.key]) || 0)
-              color: Color.foreground
-              selectionColor: Util.alpha(Color.accent, 0.45)
-              selectedTextColor: Color.foreground
+              color: Commons.Color.foreground
+              selectionColor: Util.alpha(Commons.Color.accent, 0.45)
+              selectedTextColor: Commons.Color.foreground
               font.family: Style.font.family
               font.pixelSize: Style.font.body
               font.bold: true
@@ -615,7 +646,7 @@ Item {
           Rectangle {
             anchors.fill: parent
             color: clock.activeFocus
-              ? Qt.rgba(Color.accent.r, Color.accent.g, Color.accent.b, 0.18)
+              ? Qt.rgba(Commons.Color.accent.r, Commons.Color.accent.g, Commons.Color.accent.b, 0.18)
               : (cellArea.containsMouse ? root.fadeText(0.9) : "transparent")
             Behavior on color { ColorAnimation { duration: Style.duration(100) } }
           }
@@ -647,9 +678,9 @@ Item {
               width: Style.space(56)
               horizontalAlignment: TextInput.AlignLeft
               text: cell.current
-              color: Color.foreground
-              selectionColor: Util.alpha(Color.accent, 0.45)
-              selectedTextColor: Color.foreground
+              color: Commons.Color.foreground
+              selectionColor: Util.alpha(Commons.Color.accent, 0.45)
+              selectedTextColor: Commons.Color.foreground
               font.family: Style.font.family
               font.pixelSize: Style.font.body
               font.bold: true
@@ -712,7 +743,7 @@ Item {
     Text {
       textFormat: Text.PlainText
       text: box.label
-      color: Color.foreground
+      color: Commons.Color.foreground
       font.family: Style.font.family
       font.pixelSize: Style.font.body
     }
@@ -722,10 +753,10 @@ Item {
       height: Style.space(36)
       radius: Style.cornerRadius
       color: field.activeFocus
-        ? Qt.rgba(Color.accent.r, Color.accent.g, Color.accent.b, 0.18)
+        ? Qt.rgba(Commons.Color.accent.r, Commons.Color.accent.g, Commons.Color.accent.b, 0.18)
         : (boxArea.containsMouse ? root.fadeText(0.9) : "transparent")
       border.width: 1
-      border.color: field.activeFocus ? Color.accent : root.fadeText(0.75)
+      border.color: field.activeFocus ? Commons.Color.accent : root.fadeText(0.75)
       Behavior on color { ColorAnimation { duration: Style.duration(100) } }
 
       TextInput {
@@ -735,9 +766,9 @@ Item {
         horizontalAlignment: TextInput.AlignHCenter
         verticalAlignment: TextInput.AlignVCenter
         text: String(box.value)
-        color: Color.foreground
-        selectionColor: Util.alpha(Color.accent, 0.45)
-        selectedTextColor: Color.foreground
+        color: Commons.Color.foreground
+        selectionColor: Util.alpha(Commons.Color.accent, 0.45)
+        selectedTextColor: Commons.Color.foreground
         font.family: Style.font.family
         font.pixelSize: Style.font.body
         font.bold: true
@@ -780,7 +811,7 @@ Item {
     id: win
     visible: false
     title: I18n.t("screenTime.settingsTitle")
-    color: Color.background
+    color: Commons.Color.background
     // As tall as its content, as far as the screen allows: switching a
     // section off shrinks the window, a long list of periods grows it, and
     // past the screen's height the content scrolls instead.
@@ -823,7 +854,7 @@ Item {
             textFormat: Text.PlainText
             text: I18n.t("screenTime.title")
             width: parent.width - modes.width
-            color: Color.foreground
+            color: Commons.Color.foreground
             font.family: Style.font.family
             font.pixelSize: Style.font.title
             font.bold: true
@@ -901,9 +932,9 @@ Item {
             height: Style.space(36)
             radius: Style.cornerRadius
             color: passwordField.activeFocus
-              ? Qt.rgba(Color.accent.r, Color.accent.g, Color.accent.b, 0.18) : "transparent"
+              ? Qt.rgba(Commons.Color.accent.r, Commons.Color.accent.g, Commons.Color.accent.b, 0.18) : "transparent"
             border.width: 1
-            border.color: passwordField.activeFocus ? Color.accent : root.fadeText(0.75)
+            border.color: passwordField.activeFocus ? Commons.Color.accent : root.fadeText(0.75)
             anchors.verticalCenter: parent.verticalCenter
 
             TextInput {
@@ -917,9 +948,9 @@ Item {
               echoMode: TextInput.Password
               passwordCharacter: "•"
               inputMethodHints: Qt.ImhSensitiveData | Qt.ImhNoPredictiveText | Qt.ImhNoAutoUppercase
-              color: Color.foreground
-              selectionColor: Util.alpha(Color.accent, 0.45)
-              selectedTextColor: Color.foreground
+              color: Commons.Color.foreground
+              selectionColor: Util.alpha(Commons.Color.accent, 0.45)
+              selectedTextColor: Commons.Color.foreground
               font.family: Style.font.family
               font.pixelSize: Style.font.body
               activeFocusOnTab: true
@@ -1000,10 +1031,10 @@ Item {
               implicitHeight: Math.max(Style.space(84), agreementField.implicitHeight + Style.space(4))
               radius: Style.cornerRadius
               color: Style.controlFill(agreementField.activeFocus, agreementField.hovered,
-                                       Color.foreground, Color.accent)
+                                       Commons.Color.foreground, Commons.Color.accent)
               border.width: 1
               border.color: agreementField.activeFocus
-                ? Color.accent : root.fadeText(0.75)
+                ? Commons.Color.accent : root.fadeText(0.75)
 
               ScrollView {
                 anchors.fill: parent
@@ -1016,7 +1047,7 @@ Item {
                   activeFocusOnTab: true
                   placeholderText: I18n.t("screenTime.agreementPlaceholder")
                   placeholderTextColor: root.fadeText(0.55)
-                  color: Color.foreground
+                  color: Commons.Color.foreground
                   font.family: Style.font.family
                   font.pixelSize: Style.font.body
                   background: null
@@ -1187,7 +1218,7 @@ Item {
                     id: periodRemove
                     iconText: root.iconClose
                     tooltipText: I18n.t("screenTime.removePeriod")
-                    foreground: Color.foreground
+                    foreground: Commons.Color.foreground
                     hoverColor: root.errColor
                     size: Style.space(22)
                     focusable: true
@@ -1359,9 +1390,9 @@ Item {
               visible: root.shownWeb.enabled === true
               implicitHeight: Math.max(Style.space(120), webField.implicitHeight + Style.space(4))
               radius: Style.cornerRadius
-              color: Style.controlFill(webField.activeFocus, webField.hovered, Color.foreground, Color.accent)
+              color: Style.controlFill(webField.activeFocus, webField.hovered, Commons.Color.foreground, Commons.Color.accent)
               border.width: 1
-              border.color: webField.activeFocus ? Color.accent : root.fadeText(0.75)
+              border.color: webField.activeFocus ? Commons.Color.accent : root.fadeText(0.75)
 
               ScrollView {
                 anchors.fill: parent
@@ -1374,7 +1405,7 @@ Item {
                   activeFocusOnTab: true
                   placeholderText: I18n.t("screenTime.webPlaceholder")
                   placeholderTextColor: root.fadeText(0.55)
-                  color: Color.foreground
+                  color: Commons.Color.foreground
                   font.family: Style.font.family
                   font.pixelSize: Style.font.body
                   background: null

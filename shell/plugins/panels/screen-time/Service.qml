@@ -97,9 +97,23 @@ Item {
     reflections = Array.isArray(event.reflections) ? event.reflections : []
   }
 
+  // An account is under screen time exactly when it is in this group, and
+  // membership only changes at the next login, so asking once is enough.
+  property bool member: false
+
+  Process {
+    command: ["id", "-nG"]
+    running: true
+    stdout: StdioCollector {
+      onStreamFinished: {
+        root.member = String(text || "").trim().split(/\s+/).indexOf("omarchy-screen-time") !== -1
+        if (root.member) watchProc.running = true
+      }
+    }
+  }
+
   Process {
     id: watchProc
-    running: true
     command: [root.clientPath, "watch"]
     stdout: SplitParser {
       onRead: function(line) {
@@ -111,16 +125,14 @@ Item {
     }
     onExited: {
       root.connected = false
-      retryTimer.restart()
+      if (root.member) retryTimer.restart()
     }
   }
 
   // No daemon, or the daemon restarted: try again in a bit, forever. The
   // widget simply hides while there is nothing to show. The first retries
   // come quickly, for a daemon that is restarting; after that the wait
-  // doubles up to a minute, because on the installs where screen time is
-  // never turned on this would otherwise spawn a process every few seconds
-  // for the life of the session.
+  // doubles up to a minute.
   Timer {
     id: retryTimer
     readonly property int quick: 3000

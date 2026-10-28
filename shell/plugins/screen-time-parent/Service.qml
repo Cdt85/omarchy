@@ -3,6 +3,7 @@ import Quickshell
 import Quickshell.Io
 import Quickshell.Wayland
 import qs.Commons
+import qs.Commons as Commons
 import qs.Ui
 
 // The parent's side of screen time: the minutes, a pause, the lock, and the
@@ -25,19 +26,19 @@ Item {
   readonly property bool together: statusService ? statusService.philosophy === "together" : false
 
   property string fontFamily: Style.font.menuFamily
-  property color accent: Color.polkit.accent
-  property color background: Color.polkit.background
-  property color foreground: Color.polkit.text
-  property color border: Color.polkit.border
-  property color borderError: Color.polkit.borderError
+  property color accent: Commons.Color.polkit.accent
+  property color background: Commons.Color.polkit.background
+  property color foreground: Commons.Color.polkit.text
+  property color border: Commons.Color.polkit.border
+  property color borderError: Commons.Color.polkit.borderError
   property var borderSpec: Border.surfaceSpec("polkit", errorFlash ? "border-error" : "border", errorFlash ? borderError : border, Math.max(1, Style.space(2)), "border-alpha")
-  property color scrim: Color.polkit.scrim
+  property color scrim: Commons.Color.polkit.scrim
   readonly property int cornerRadius: Style.cornerRadius
   property int contentMargin: Style.spacing.panelPadding
   property int fieldHeight: Math.max(Style.space(42), Style.spacing.controlHeight)
 
   readonly property bool lightTheme: {
-    var bg = Color.background
+    var bg = Commons.Color.background
     return (0.299 * bg.r + 0.587 * bg.g + 0.114 * bg.b) > 0.5
   }
   readonly property color okColor: lightTheme ? "#3C7C4E" : "#5FA46B"
@@ -195,7 +196,7 @@ Item {
           root.failPassword(I18n.t("screenTime.tooManyTries").arg(payload.retry_in_seconds))
         } else {
           root.reset()
-          root.note = String(payload.error || "failed")
+          root.note = payload.error ? String(payload.error) : I18n.t("screenTime.failed")
           root.noteColor = root.blockColor
         }
       }
@@ -299,7 +300,7 @@ Item {
           Text {
             textFormat: Text.PlainText
             text: root.iconLock
-            color: root.errorFlash ? Color.polkit.textError : root.accent
+            color: root.errorFlash ? Commons.Color.polkit.textError : root.accent
             font.family: root.fontFamily
             font.pixelSize: Style.font.iconLarge
             anchors.verticalCenter: parent.verticalCenter
@@ -354,7 +355,7 @@ Item {
           color: passwordInput.activeFocus && !root.errorFlash
             ? Qt.rgba(root.accent.r, root.accent.g, root.accent.b, 0.12) : "transparent"
           border.width: 1
-          border.color: root.errorFlash ? Color.polkit.textError
+          border.color: root.errorFlash ? Commons.Color.polkit.textError
             : (passwordInput.activeFocus ? root.accent : Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.25))
           Behavior on color { ColorAnimation { duration: Style.duration(100) } }
 
@@ -373,7 +374,7 @@ Item {
             font.pixelSize: Style.font.iconLarge
             echoMode: TextInput.Password
             passwordCharacter: "•"
-            color: root.errorFlash ? Color.polkit.textError : root.foreground
+            color: root.errorFlash ? Commons.Color.polkit.textError : root.foreground
             cursorVisible: activeFocus && !root.submitted && !root.errorFlash
             readOnly: root.submitted || root.errorFlash
             enabled: root.dialogVisible
@@ -392,7 +393,7 @@ Item {
             anchors.rightMargin: Style.space(12)
             anchors.verticalCenter: parent.verticalCenter
             text: root.submitted ? I18n.t("screenTime.checking") : I18n.t("screenTime.adultPassword")
-            color: root.errorFlash ? Color.polkit.textError : root.foreground
+            color: root.errorFlash ? Commons.Color.polkit.textError : root.foreground
             opacity: root.errorFlash ? 1 : 0.36
             font.family: root.fontFamily
             font.pixelSize: Style.font.body

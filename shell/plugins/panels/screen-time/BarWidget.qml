@@ -3,6 +3,7 @@ import Quickshell
 import Quickshell.Io
 import qs.Ui
 import qs.Commons
+import qs.Commons as Commons
 
 // The pill in the bar plus the panel behind it. The pill shows a glyph for
 // the phase and the time that is left; the panel is where the child earns
@@ -51,13 +52,13 @@ Panel {
   // towards the background instead of darkening, and pick the accent colours
   // per theme.
   function fade(c, amount) {
-    var bg = Color.background
+    var bg = Commons.Color.background
     return Qt.rgba(c.r + (bg.r - c.r) * amount,
                    c.g + (bg.g - c.g) * amount,
                    c.b + (bg.b - c.b) * amount, 1)
   }
   readonly property bool lightTheme: {
-    var bg = Color.background
+    var bg = Commons.Color.background
     return (0.299 * bg.r + 0.587 * bg.g + 0.114 * bg.b) > 0.5
   }
   readonly property color warnColor: lightTheme ? "#B4620A" : "#E5A050"
@@ -78,10 +79,10 @@ Panel {
       var m = Math.floor((seconds % 3600) / 60)
       // A whole hour is "1h", not "1h00". The zeroes only earn their place
       // when there are minutes to read next to them.
-      if (m === 0) return h + "h"
-      return h + "h" + (m < 10 ? "0" : "") + m
+      if (m === 0) return I18n.t("screenTime.hoursShort").arg(h)
+      return I18n.t("screenTime.hoursMinutesShort").arg(h).arg((m < 10 ? "0" : "") + m)
     }
-    if (seconds >= 600) return Math.floor(seconds / 60) + "m"
+    if (seconds >= 600) return I18n.t("screenTime.minutesShort").arg(Math.floor(seconds / 60))
     var mm = Math.floor(seconds / 60)
     var ss = seconds % 60
     return mm + ":" + (ss < 10 ? "0" : "") + ss
@@ -110,11 +111,25 @@ Panel {
   // --- quiz state -----------------------------------------------------
 
   property var question: null        // {id, text, reward_seconds}
-  property string quizNote: ""       // why there is no question (cap reached, ...)
+  property string quizNoteKind: ""   // why there is no question: "full" or "none"
+  readonly property string quizNote: quizNoteKind === "full" ? I18n.t("screenTime.bonusFull")
+    : quizNoteKind === "none" ? I18n.t("screenTime.noQuestion") : ""
   // Newest first, so the reward that just landed is always in view.
   readonly property var earnEventsView: screenTime && screenTime.earnEvents
     ? screenTime.earnEvents.slice().reverse() : []
-  property string feedback: ""
+  // What the last answer earned, kept as a kind and its values rather than
+  // as text, so a language switch redraws it.
+  property string feedbackKind: ""
+  property var feedbackArgs: []
+  readonly property string feedback: {
+    var a = feedbackArgs
+    if (feedbackKind === "tooFast") return I18n.t("screenTime.tooFast").arg(a[0])
+    if (feedbackKind === "expired") return I18n.t("screenTime.questionExpired")
+    if (feedbackKind === "failed") return I18n.t("screenTime.questionFailed")
+    if (feedbackKind === "correct") return I18n.t("screenTime.correct").arg(a[0])
+    if (feedbackKind === "wrong") return I18n.t("screenTime.notQuite").arg(a[0]).arg(a[1])
+    return ""
+  }
   property color feedbackColor: root.bar ? root.bar.barForeground : "white"
   readonly property bool earnEnabled: screenTime ? screenTime.earnEnabled === true : false
 
@@ -124,27 +139,27 @@ Panel {
   // the stat row, so this says the thing a number cannot.
   readonly property string stateLine: {
     if (!screenTime) return ""
-    if (phase === "empty") return "time is up"
+    if (phase === "empty") return I18n.t("screenTime.stateUp")
     if (phase === "bedtime") return blockedName
-    if (phase === "paused") return "paused by a parent"
-    if (phase === "idle") return "idle, not counting"
-    return "counting down"
+    if (phase === "paused") return I18n.t("screenTime.statePaused")
+    if (phase === "idle") return I18n.t("screenTime.stateIdle")
+    return I18n.t("screenTime.stateCounting")
   }
 
   // What to call the block that is on right now. The daemon names the period
   // the family wrote, so dinner does not get announced as bedtime.
   readonly property string blockedName: {
     var name = screenTime ? plain(String(screenTime.blockedLabel || "")).trim() : ""
-    return name === "" ? "blocked" : name.toLowerCase()
+    return name === "" ? I18n.t("screenTime.blocked") : name.toLowerCase()
   }
 
   // A fresh config names the profile "Default", which is nobody, and that is
   // what ends up in the biggest text on the card. Until a family gives a
   // child a name of their own, the panel says what it is instead.
   readonly property string heroTitle: {
-    if (!screenTime) return "Screen time"
+    if (!screenTime) return I18n.t("screenTime.title")
     var name = plain(screenTime.profileName).trim()
-    return (name === "" || name === "Default") ? "Screen time" : name
+    return (name === "" || name === "Default") ? I18n.t("screenTime.title") : name
   }
 
   // The line under the bar: what the bar itself cannot say. In limits mode
@@ -155,12 +170,12 @@ Panel {
     if (!screenTime) return ""
     if (together) {
       if (screenTime.agreementMinutes > 0)
-        return "about " + fmt(screenTime.agreementMinutes * 60) + " agreed"
+        return I18n.t("screenTime.aboutAgreed").arg(fmt(screenTime.agreementMinutes * 60))
       return ""
     }
     var next = screenTime.nextBlock
     if (!next || !next.start) return ""
-    return plain(String(next.label)).toLowerCase() + " at " + plain(String(next.start))
+    return I18n.t("screenTime.blockAt").arg(plain(String(next.label)).toLowerCase()).arg(plain(String(next.start)))
   }
 
   // The day in even cells, so the eye can compare them instead of reading a
@@ -168,12 +183,12 @@ Panel {
   // which keeps a plain day a plain two-cell row.
   readonly property var dayStats: {
     if (!screenTime || together) return []
-    var out = [{ label: "used", value: fmt(screenTime.spentSeconds), accent: false }]
+    var out = [{ label: I18n.t("screenTime.statUsed"), value: fmt(screenTime.spentSeconds), accent: false }]
     if (screenTime.earnedSeconds > 0)
-      out.push({ label: "earned", value: fmt(screenTime.earnedSeconds), accent: true })
+      out.push({ label: I18n.t("screenTime.statEarned"), value: fmt(screenTime.earnedSeconds), accent: true })
     if (screenTime.grantedSeconds > 0)
-      out.push({ label: "given", value: fmt(screenTime.grantedSeconds), accent: true })
-    out.push({ label: "budget", value: fmt(screenTime.budgetSeconds), accent: false })
+      out.push({ label: I18n.t("screenTime.statGiven"), value: fmt(screenTime.grantedSeconds), accent: true })
+    out.push({ label: I18n.t("screenTime.statBudget"), value: fmt(screenTime.budgetSeconds), accent: false })
     return out
   }
 
@@ -184,7 +199,9 @@ Panel {
 
   function submitAnswer() {
     if (!question || answerProc.running) return
-    var given = answerField.text.trim()
+    var field = panel.loadedContent ? panel.loadedContent.answerField : null
+    if (!field) return
+    var given = field.text.trim()
     if (given === "") return
     answerProc.command = [root.clientPath, "answer", String(question.id), given]
     answerProc.running = true
@@ -193,36 +210,41 @@ Panel {
   function applyQuiz(payload) {
     if (payload.ok === true && payload.question) {
       question = payload.question
-      quizNote = ""
+      quizNoteKind = ""
       return
     }
     question = null
-    if (payload.error === "daily_cap_reached") quizNote = "The bonus for today is full. Tomorrow there is room again."
-    else if (payload.error === "earning_disabled") quizNote = ""
-    else quizNote = "No question right now."
+    if (payload.error === "daily_cap_reached") quizNoteKind = "full"
+    else if (payload.error === "earning_disabled") quizNoteKind = ""
+    else quizNoteKind = "none"
+  }
+
+  function showFeedback(kind, args) {
+    feedbackArgs = args
+    feedbackKind = kind
   }
 
   function applyVerdict(payload) {
     if (payload.error === "too_fast") {
-      feedback = "Too fast, read it again. Try in " + payload.wait_seconds + "s."
+      showFeedback("tooFast", [Number(payload.wait_seconds) || 0])
       feedbackColor = root.warnColor
       return
     }
     if (payload.ok !== true) {
-      feedback = payload.error === "expired" ? "That one expired, here is a new one." : "Something went wrong, new question."
+      showFeedback(payload.error === "expired" ? "expired" : "failed", [])
       feedbackColor = root.warnColor
-      answerField.text = ""
+      clearAnswer()
       fetchQuestion()
       return
     }
     if (payload.correct === true) {
-      feedback = "Correct! +" + payload.reward_seconds + "s"
+      showFeedback("correct", [Number(payload.reward_seconds) || 0])
       feedbackColor = root.okColor
     } else {
-      feedback = "Not quite: " + payload.text + " = " + payload.answer
+      showFeedback("wrong", [plain(payload.text), plain(payload.answer)])
       feedbackColor = root.blockColor
     }
-    answerField.text = ""
+    clearAnswer()
     fetchQuestion()
   }
 
@@ -237,9 +259,13 @@ Panel {
     root.close()
   }
 
+  function clearAnswer() {
+    if (panel.loadedContent) panel.loadedContent.answerField.text = ""
+  }
+
   function resetPanel() {
-    feedback = ""
-    answerField.text = ""
+    showFeedback("", [])
+    clearAnswer()
   }
 
   onOpenedChanged: {
@@ -260,7 +286,9 @@ Panel {
 
   function submitReflection() {
     if (reflectProc.running) return
-    var text = reflectField.text.trim()
+    var field = panel.loadedContent ? panel.loadedContent.reflectField : null
+    if (!field) return
+    var text = field.text.trim()
     if (text === "") return
     reflectProc.command = [root.clientPath, "reflect", text]
     reflectProc.running = true
@@ -297,7 +325,7 @@ Panel {
       onStreamFinished: {
         var payload
         try { payload = JSON.parse(text) } catch (e) { return }
-        if (payload.ok === true) reflectField.text = ""
+        if (payload.ok === true && panel.loadedContent) panel.loadedContent.reflectField.text = ""
       }
     }
   }
@@ -374,27 +402,33 @@ Panel {
     owner: root
     bar: root.bar
     open: root.opened
-    focusTarget: root.together ? reflectField : (root.earnEnabled ? answerField : keyCatcher)
+    focusTarget: !panel.loadedContent ? null
+      : (root.together ? panel.loadedContent.reflectField
+        : (root.earnEnabled ? panel.loadedContent.answerField : panel.loadedContent))
     // Agreement mode is nearly all prose, and prose reads better on a
     // narrower measure than a card full of controls.
     readonly property int desiredWidth: Style.space(root.together ? 280 : 330)
     contentWidth: Math.min(desiredWidth,
                            panel.availableCardWidth > 0 ? panel.availableCardWidth : desiredWidth)
-    contentHeight: panel.fittedContentHeight(content.implicitHeight)
+    contentHeight: panel.fittedContentHeight(panel.loadedContentHeight)
 
-    // A form, so a plain Item as the key catcher: Tab walks the controls the
-    // way Qt already knows how to, and only the panel-wide keys live here.
-    Item {
+    content: PanelKeyCatcher {
       id: keyCatcher
+      property alias answerField: answerField
+      property alias reflectField: reflectField
+      implicitHeight: cardColumn.implicitHeight
       anchors.fill: parent
-      focus: true
-
-      Keys.onPressed: function(event) {
-        if (event.key === Qt.Key_Escape) { root.close(); event.accepted = true }
+      onCloseRequested: root.close()
+      // A form, so Tab walks the controls in focus order instead of
+      // switching panels.
+      onTabRequested: function(direction) {
+        var from = keyCatcher.Window.activeFocusItem || keyCatcher
+        var next = from.nextItemInFocusChain(direction > 0)
+        if (next) next.forceActiveFocus()
       }
 
       Column {
-        id: content
+        id: cardColumn
         width: parent.width
         // The shell's own rhythm: 14 between sections, 6 inside one.
         spacing: Style.space(14)
@@ -403,12 +437,12 @@ Panel {
         // detail pill, and one uppercase meta line underneath
         PanelHero {
           width: parent.width
-          foreground: Color.popups.text
+          foreground: Commons.Color.popups.text
           title: root.heroTitle
           detail: {
-            if (root.together) return root.fmt(root.screenTime ? root.screenTime.spentSeconds : 0) + " today"
-            if (root.blockedPhase) return root.phase === "bedtime" ? root.blockedName : "time's up"
-            return root.fmt(root.remaining) + " left"
+            if (root.together) return I18n.t("screenTime.spentToday").arg(root.fmt(root.screenTime ? root.screenTime.spentSeconds : 0))
+            if (root.blockedPhase) return root.phase === "bedtime" ? root.blockedName : I18n.t("screenTime.timesUp")
+            return I18n.t("screenTime.timeLeft").arg(root.fmt(root.remaining))
           }
           // One line, so one fact at a time: the hero meta elides rather than
           // wraps. Earned and granted minutes already show further down, and
@@ -416,9 +450,9 @@ Panel {
           meta: {
             if (!root.screenTime) return ""
             if (root.together) {
-              if (root.phase === "paused") return "paused"
+              if (root.phase === "paused") return I18n.t("screenTime.metaPaused")
               if (root.screenTime.stretchSeconds >= 600)
-                return root.fmt(root.screenTime.stretchSeconds) + " without a break"
+                return I18n.t("screenTime.withoutBreak").arg(root.fmt(root.screenTime.stretchSeconds))
               return ""
             }
             return root.stateLine
@@ -503,7 +537,7 @@ Panel {
                   textFormat: Text.PlainText
                   text: modelData.value
                   anchors.horizontalCenter: parent.horizontalCenter
-                  color: modelData.accent === true ? root.okColor : Color.popups.text
+                  color: modelData.accent === true ? root.okColor : Commons.Color.popups.text
                   font.family: Style.font.family
                   font.pixelSize: Style.font.title
                   font.bold: true
@@ -513,7 +547,7 @@ Panel {
                   textFormat: Text.PlainText
                   text: String(modelData.label).toUpperCase()
                   anchors.horizontalCenter: parent.horizontalCenter
-                  color: root.fade(Color.popups.text, 0.45)
+                  color: root.fade(Commons.Color.popups.text, 0.45)
                   font.family: Style.font.family
                   font.pixelSize: Style.font.caption
                   font.bold: true
@@ -540,7 +574,7 @@ Panel {
             height: Style.space(12)
             radius: 0
             visible: !root.together || (root.screenTime && root.screenTime.agreementMinutes > 0)
-            color: root.fade(Color.popups.text, 0.86)
+            color: root.fade(Commons.Color.popups.text, 0.86)
 
             readonly property int total: {
               if (!root.screenTime) return 0
@@ -624,7 +658,7 @@ Panel {
             visible: root.underBarLine !== ""
             text: root.underBarLine
             width: parent.width
-            color: root.fade(Color.popups.text, 0.45)
+            color: root.fade(Commons.Color.popups.text, 0.45)
             font.family: Style.font.family
             font.pixelSize: Style.font.caption
           }
@@ -641,18 +675,18 @@ Panel {
 
           PanelSectionHeader {
             text: I18n.t("screenTime.ourAgreement")
-            foreground: Color.popups.text
+            foreground: Commons.Color.popups.text
           }
 
           Text {
             textFormat: Text.PlainText
             text: root.screenTime && root.screenTime.agreementText !== ""
-              ? "“" + root.plain(root.screenTime.agreementText) + "”"
-              : "Nothing written down yet. Make one together."
+              ? I18n.t("screenTime.agreementQuoted").arg(root.plain(root.screenTime.agreementText))
+              : I18n.t("screenTime.noAgreement")
             width: parent.width
             wrapMode: Text.WordWrap
             font.italic: root.screenTime ? root.screenTime.agreementText !== "" : false
-            color: Color.popups.text
+            color: Commons.Color.popups.text
             font.family: Style.font.family
             font.pixelSize: Style.font.body
           }
@@ -668,7 +702,7 @@ Panel {
 
           PanelSectionHeader {
             text: I18n.t("screenTime.howIsItGoing")
-            foreground: Color.popups.text
+            foreground: Commons.Color.popups.text
           }
 
           // No button next to it: enter keeps the note, and the placeholder
@@ -741,7 +775,7 @@ Panel {
                   anchors.left: parent.left
                   anchors.top: parent.top
                   radius: Math.max(Style.cornerRadius, Style.space(10))
-                  color: root.fade(Color.popups.text, 0.86)
+                  color: root.fade(Commons.Color.popups.text, 0.86)
                   width: bubbleText.width + Style.space(20)
                   height: bubbleText.implicitHeight + Style.space(16)
                   rotation: noteRow.tilt
@@ -756,7 +790,7 @@ Panel {
                     width: Math.min(implicitWidth, notes.width * 0.72)
                     wrapMode: Text.WordWrap
                     anchors.centerIn: parent
-                    color: Color.popups.text
+                    color: Commons.Color.popups.text
                     font.family: Style.font.family
                     font.pixelSize: Style.font.body
                   }
@@ -769,7 +803,7 @@ Panel {
                   id: forgetButton
                   iconText: root.iconClose
                   tooltipText: I18n.t("screenTime.forgetNote")
-                  foreground: Color.popups.text
+                  foreground: Commons.Color.popups.text
                   hoverColor: root.blockColor
                   size: Style.space(20)
                   focusable: true
@@ -792,7 +826,7 @@ Panel {
                   anchors.right: parent.right
                   anchors.bottom: bubble.bottom
                   anchors.bottomMargin: Style.space(5)
-                  color: root.fade(Color.popups.text, 0.55)
+                  color: root.fade(Commons.Color.popups.text, 0.55)
                   font.family: Style.font.family
                   font.pixelSize: Style.font.caption
                 }
@@ -828,7 +862,7 @@ Panel {
 
           PanelSectionHeader {
             text: I18n.t("screenTime.earnMinutes")
-            foreground: Color.popups.text
+            foreground: Commons.Color.popups.text
           }
 
           // The one thing the child came here to do, so it sits on a surface
@@ -839,7 +873,7 @@ Panel {
             width: parent.width
             visible: root.question !== null
             radius: Style.cornerRadius
-            color: root.fade(Color.popups.text, 0.88)
+            color: root.fade(Commons.Color.popups.text, 0.88)
             implicitHeight: questionRow.implicitHeight + Style.space(12)
 
             Row {
@@ -855,7 +889,7 @@ Panel {
                 id: questionText
                 textFormat: Text.PlainText
                 text: root.question ? String(root.question.text) + " =" : ""
-                color: Color.popups.text
+                color: Commons.Color.popups.text
                 font.family: Style.font.family
                 font.bold: true
                 font.pixelSize: Style.font.title
@@ -894,7 +928,7 @@ Panel {
             text: root.quizNote
             width: parent.width
             wrapMode: Text.WordWrap
-            color: root.fade(Color.popups.text, 0.3)
+            color: root.fade(Commons.Color.popups.text, 0.3)
             font.family: Style.font.family
             font.pixelSize: Style.font.body
           }
@@ -912,9 +946,9 @@ Panel {
             textFormat: Text.PlainText
             visible: root.question !== null && root.screenTime !== null
             text: root.question && root.screenTime
-              ? "+" + root.question.reward_seconds + "s per correct answer  ·  " + root.fmt(root.screenTime.earnRoomSeconds) + " earnable today"
+              ? I18n.t("screenTime.quizTerms").arg(Number(root.question.reward_seconds) || 0).arg(root.fmt(root.screenTime.earnRoomSeconds))
               : ""
-            color: root.fade(Color.popups.text, 0.45)
+            color: root.fade(Commons.Color.popups.text, 0.45)
             font.family: Style.font.family
             font.pixelSize: Style.font.caption
           }
@@ -929,7 +963,7 @@ Panel {
 
             PanelSectionHeader {
               text: I18n.t("screenTime.sumsToday").arg(root.fmt(root.screenTime ? root.screenTime.earnedSeconds : 0).toUpperCase())
-              foreground: Color.popups.text
+              foreground: Commons.Color.popups.text
             }
 
             ListView {
@@ -953,7 +987,7 @@ Panel {
                   id: earnRowText
                   textFormat: Text.PlainText
                   text: root.plain(modelData.q)
-                  color: root.fade(Color.popups.text, 0.2)
+                  color: root.fade(Commons.Color.popups.text, 0.2)
                   font.family: Style.font.family
                   font.pixelSize: Style.font.body
                   anchors.verticalCenter: parent.verticalCenter
@@ -977,9 +1011,9 @@ Panel {
                     textFormat: Text.PlainText
                     text: parent.parent.missed
                       ? String(modelData.answer)
-                      : "+" + Number(modelData.seconds) + "s"
+                      : I18n.t("screenTime.rewardSeconds").arg(Number(modelData.seconds) || 0)
                     color: parent.parent.missed
-                      ? root.fade(Color.popups.text, 0.35) : root.okColor
+                      ? root.fade(Commons.Color.popups.text, 0.35) : root.okColor
                     font.family: Style.font.family
                     font.pixelSize: Style.font.body
                     font.bold: !parent.parent.missed
@@ -1007,13 +1041,13 @@ Panel {
             PanelSectionHeader {
               id: parentHeader
               text: I18n.t("screenTime.parentHeader")
-              foreground: Color.popups.text
+              foreground: Commons.Color.popups.text
             }
 
             Text {
               textFormat: Text.PlainText
               text: root.iconLock
-              color: root.fade(Color.popups.text, 0.5)
+              color: root.fade(Commons.Color.popups.text, 0.5)
               anchors.right: parent.right
               anchors.verticalCenter: parentHeader.verticalCenter
               font.family: Style.font.family
@@ -1025,7 +1059,7 @@ Panel {
             width: parent.width
             radius: Style.cornerRadius
             implicitHeight: parentRow.implicitHeight + Style.space(12)
-            color: root.fade(Color.popups.text, 0.9)
+            color: root.fade(Commons.Color.popups.text, 0.9)
 
             Row {
               id: parentRow
@@ -1042,7 +1076,7 @@ Panel {
                 wrapMode: Text.WordWrap
                 anchors.verticalCenter: parent.verticalCenter
                 text: I18n.t("screenTime.parentHint")
-                color: root.fade(Color.popups.text, 0.2)
+                color: root.fade(Commons.Color.popups.text, 0.2)
                 font.family: Style.font.family
                 font.pixelSize: Style.font.body
               }

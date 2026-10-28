@@ -1,9 +1,10 @@
 #!/usr/bin/ash
 # Stands in for cryptsetup in the initramfs to note which key slot unlocked the
 # disk, so omarchy-login-select can open that person's desktop. Every call but
-# the unlock the encrypt hook hands Plymouth's password to (open with the key
-# on stdin) goes straight through. That one runs the real cryptsetup once,
-# verbose, keeps its exit status, and only after it succeeded writes
+# an unlock goes straight through. An unlock, whether Plymouth hands the
+# password over or cryptsetup prompts on the console itself, runs the real
+# cryptsetup once, verbose, with its prompt and errors on screen as before,
+# keeps its exit status, and only after it succeeded writes
 # "<LUKS UUID> <slot>" to /run, which switch_root carries into the system.
 # Nothing here may turn an unlock that worked into one that failed.
 
@@ -11,16 +12,17 @@ real=${CRYPTSETUP_REAL:-/usr/bin/cryptsetup.real}
 record=${LUKS_SLOT_RECORD:-/run/omarchy/luks-slot}
 
 case " $* " in
-  *" open "*" --key-file=- "*) ;;
+  *" open "*) ;;
   *) exec "$real" "$@" ;;
 esac
 
 out=${record%/*}/luks-open.out
 mkdir -p "${record%/*}" 2>/dev/null
-"$real" --verbose "$@" >"$out" 2>&1
+# Only stdout is kept aside, where verbose names the slot; the prompt and any
+# error stay on stderr, on screen.
+"$real" --verbose "$@" >"$out"
 status=$?
-# What cryptsetup said still reaches the screen, as it would have.
-grep -v '^Key slot [0-9]* unlocked' "$out" >&2 2>/dev/null
+grep -v -e '^Key slot [0-9]* unlocked' -e '^Command successful' -e '^No usable token' "$out" 2>/dev/null
 [ "$status" -eq 0 ] || { rm -f "$out"; exit "$status"; }
 
 slot=$(sed -n 's/^Key slot \([0-9][0-9]*\) unlocked.*/\1/p' "$out" 2>/dev/null | head -n 1)

@@ -22,8 +22,10 @@ case "$*" in
   *--verbose*open*)
     password=$(cat)
     [ "$password" = "kidpass" ] || { echo "No key available with this passphrase." >&2; exit 2; }
+    echo "No usable token is available."
     echo "Key slot 3 unlocked."
     echo "Command successful."
+    echo "Something else cryptsetup said."
     ;;
 esac
 SH
@@ -33,14 +35,14 @@ wrapper=$ROOT/etc/initcpio/omarchy-luks-slot/cryptsetup
 unlock() {
   rm -f "$tmp/calls" "$tmp/run/luks-slot"
   printf '%s' "$1" | TEST_TMP=$tmp CRYPTSETUP_REAL=$tmp/real LUKS_SLOT_RECORD=$tmp/run/luks-slot \
-    "$busybox" ash "$wrapper" open --type luks --key-file=- /dev/nvme0n1p2 root '>/dev/null' 2>"$tmp/stderr"
+    "$busybox" ash "$wrapper" open --type luks --key-file=- /dev/nvme0n1p2 root '>/dev/null' >"$tmp/stdout" 2>"$tmp/stderr"
 }
 
 unlock kidpass || fail "a right password unlocks"
 [[ $(cat "$tmp/run/luks-slot") == "uuid-root 3" ]] || fail "the unlock records the disk and the slot that opened it" "$(cat "$tmp/run/luks-slot" 2>/dev/null)"
 grep -q 'open --type luks --key-file=- /dev/nvme0n1p2 root >/dev/null' "$tmp/calls" || fail "the real cryptsetup gets the hook's arguments untouched, quiet included" "$(cat "$tmp/calls")"
 [[ $(grep -c -- 'open' "$tmp/calls") == 1 ]] || fail "the unlock runs once"
-grep -q 'Command successful' "$tmp/stderr" || fail "what cryptsetup says still reaches the screen"
+grep -q 'Something else cryptsetup said' "$tmp/stdout" && ! grep -q 'Key slot\|Command successful' "$tmp/stdout" || fail "what cryptsetup would have said reaches the screen, without what verbose adds"
 pass "a Plymouth unlock runs cryptsetup once and records which slot opened the disk"
 
 status=0
@@ -55,6 +57,14 @@ TEST_TMP=$tmp CRYPTSETUP_REAL=$tmp/real LUKS_SLOT_RECORD=$tmp/run/luks-slot "$bu
 [[ $(cat "$tmp/calls") == "isLuks /dev/nvme0n1p2" ]] || fail "other calls pass straight through" "$(cat "$tmp/calls")"
 [[ ! -e $tmp/run/luks-slot ]] || fail "other calls record nothing"
 pass "every other cryptsetup call passes straight through"
+
+# The console prompt, when Plymouth is not running: cryptsetup asks on its own,
+# with no --key-file, and the unlock is recorded all the same.
+rm -f "$tmp/run/luks-slot"
+printf 'kidpass' | TEST_TMP=$tmp CRYPTSETUP_REAL=$tmp/real LUKS_SLOT_RECORD=$tmp/run/luks-slot \
+  "$busybox" ash "$wrapper" open --type luks /dev/nvme0n1p2 root >/dev/null 2>&1 || fail "a console unlock unlocks"
+[[ $(cat "$tmp/run/luks-slot") == "uuid-root 3" ]] || fail "a console unlock records the slot too"
+pass "an unlock at the console prompt, without Plymouth, is recorded too"
 
 "$busybox" ash -n "$wrapper" || fail "the wrapper parses under busybox ash"
 pass "the wrapper parses under the initramfs shell"

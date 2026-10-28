@@ -35,12 +35,15 @@ touch "$tmp/acls"
 program() { printf '#!/bin/sh\n' >"$tmp/usr/bin/$1"; chmod +x "$tmp/usr/bin/$1"; }
 entry() { printf '[Desktop Entry]\nName=%s\nExec=%s\n' "$1" "$2" >"$tmp/apps/$1.desktop"; }
 program steam
+program chromium
+mkdir -p "$tmp/usr/lib/chromium" && printf '#!/bin/sh\n' >"$tmp/usr/lib/chromium/chromium"
 program omarchy-launch-webapp
 program bash
 ln -s steam "$tmp/usr/bin/steam-runtime"
 entry Steam "env GDK_SCALE=2 steam-runtime %U"
 entry Discord "omarchy-launch-webapp https://discord.com/app"
 entry Shell "bash -c thing"
+entry Chromium "chromium %U"
 
 apply() {
   APPS_TESTING=1 APPS_BLOCKED_DIR=$tmp/blocked APPS_STATE=$tmp/state/applied APPS_DESKTOP_DIRS=$tmp/apps APPS_PROGRAM_DIRS=$tmp/usr/bin APPS_SYSTEM_ROOTS=$tmp/usr \
@@ -65,6 +68,14 @@ pass "an app taken off someone's list is theirs to run again, and nobody else's 
 apply
 [[ $(cat "$tmp/acls") == "bob $tmp/usr/bin/steam" ]] || fail "a rerun after an upgrade denies the program again"
 pass "the pacman hook's rerun denies a program an upgrade replaced"
+
+printf 'Chromium\n' >"$tmp/blocked/bob"
+apply
+grep -qx "bob $tmp/usr/bin/chromium" "$tmp/acls" && grep -qx "bob $tmp/usr/lib/chromium" "$tmp/acls" || fail "a launcher's own directory, where the real binary is, is denied with it" "$(cat "$tmp/acls")"
+printf 'Steam\n' >"$tmp/blocked/bob"
+apply
+! grep -q chromium "$tmp/acls" || fail "unblocked, the program's directory is theirs again"
+pass "a program's own directory, where a launcher hands off to the real binary, is denied with it"
 
 rm -f "$tmp/blocked/bob"
 apply

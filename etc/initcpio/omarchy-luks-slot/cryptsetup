@@ -18,6 +18,9 @@ esac
 
 out=${record%/*}/luks-open.out
 mkdir -p "${record%/*}" 2>/dev/null
+# Somewhere to keep the output first, or the unlock goes straight through;
+# `true`, since a redirect failing on `:` would end this shell instead.
+true >"$out" 2>/dev/null || exec "$real" "$@"
 # Only stdout is kept aside, where verbose names the slot; the prompt and any
 # error stay on stderr, on screen.
 "$real" --verbose "$@" >"$out"

@@ -83,3 +83,14 @@ delay_after_unlock() {
 [[ $(delay_after_unlock 950) == '{"delay":120,"kind":"after_unlock"}' ]] || fail "a grown-up's unlock at zero gets the grace" "$(delay_after_unlock 950)"
 [[ $(delay_after_unlock 500) == '{"delay":30,"kind":"child_unlock"}' ]] || fail "a grown-up's unlock long ago earns nothing now" "$(delay_after_unlock 500)"
 pass "only a grown-up's unlock at zero earns the grace; the child's own relocks quickly"
+
+# An answer that the screen is locked counts only from the real Quickshell:
+# anything else listening on the account's shell socket is not believed.
+fake_ss_dir=$(mktemp -d)
+printf '#!/bin/bash\necho "u_str LISTEN 0 50 /run/user/1001/omarchy-shell-abc.sock 1 * 0 users:((\\"x\\",pid=%s,fd=3))"\n' "$$" >"$fake_ss_dir/ss"
+chmod +x "$fake_ss_dir/ss"
+if PATH="$fake_ss_dir:$PATH" st_shell_trusted 1001; then fail "a listener that is not Quickshell is not believed"; fi
+PATH="$fake_ss_dir:$PATH" OMARCHY_SCREEN_TIME_SHELL_EXE=$(readlink -e /proc/$$/exe) st_shell_trusted 1001 || fail "the real shell is believed"
+PATH="$fake_ss_dir:$PATH" st_shell_trusted 1002 || fail "another account's sockets are not this one's concern"
+rm -rf "$fake_ss_dir"
+pass "a 'locked' answer counts only from the real Quickshell on the account's socket"

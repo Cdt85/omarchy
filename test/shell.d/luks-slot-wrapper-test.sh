@@ -66,6 +66,11 @@ printf 'kidpass' | TEST_TMP=$tmp CRYPTSETUP_REAL=$tmp/real LUKS_SLOT_RECORD=$tmp
 [[ $(cat "$tmp/run/luks-slot") == "uuid-root 3" ]] || fail "a console unlock records the slot too"
 pass "an unlock at the console prompt, without Plymouth, is recorded too"
 
+# Nowhere to keep the record, the unlock still goes through untouched.
+printf 'kidpass' | TEST_TMP=$tmp CRYPTSETUP_REAL=$tmp/real LUKS_SLOT_RECORD=/proc/no-such-dir/luks-slot \
+  "$busybox" ash "$wrapper" open --type luks --key-file=- /dev/nvme0n1p2 root >/dev/null 2>&1 || fail "an unlock with nowhere to record still unlocks"
+pass "an unlock with nowhere to keep the record goes straight through"
+
 "$busybox" ash -n "$wrapper" || fail "the wrapper parses under busybox ash"
 pass "the wrapper parses under the initramfs shell"
 

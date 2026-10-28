@@ -13,7 +13,8 @@ source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/base-test.sh"
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 export TEST_TMP=$tmp
-mkdir -p "$tmp/bin" "$tmp/lists" "$tmp/run" "$tmp/chromium"
+mkdir -p "$tmp/bin" "$tmp/lists" "$tmp/run" "$tmp/chromium" "$tmp/zen"
+printf '{"policies": {"DontCheckDefaultBrowser": true}}\n' >"$tmp/zen/policies.json"
 fake() { cat >"$tmp/bin/$1"; chmod +x "$tmp/bin/$1"; }
 
 fake id <<'SH'
@@ -39,6 +40,10 @@ SH
 fake dnsmasq <<'SH'
 #!/bin/bash
 SH
+fake busctl <<'SH'
+#!/bin/bash
+echo "busctl ${*: -1}" >>"$TEST_TMP/busctl"
+SH
 fake pacman <<'SH'
 #!/bin/bash
 echo "pacman $*" >>"$TEST_TMP/pacman"
@@ -47,7 +52,8 @@ SH
 apply() {
   rm -f "$tmp/systemctl" "$tmp/setfacl"
   WEB_ALLOWLIST_TESTING=1 WEB_ALLOWLIST_DIR=$tmp/lists WEB_ALLOWLIST_RUN=$tmp/run WEB_ALLOWLIST_RESOLVED_SOCKET=$tmp/socket \
-    WEB_ALLOWLIST_POLICY_DIRS=$tmp/chromium:$tmp/missing PATH="$tmp/bin:$PATH" "$ROOT/bin/omarchy-web-allowlist-apply"
+    WEB_ALLOWLIST_POLICY_DIRS=$tmp/chromium:$tmp/missing WEB_ALLOWLIST_FIREFOX_DIRS=$tmp/zen:$tmp/missing \
+    WEB_ALLOWLIST_DBUS_POLICY=$tmp/dbus.conf PATH="$tmp/bin:$PATH" "$ROOT/bin/omarchy-web-allowlist-apply" "$@"
 }
 
 printf 'on\nkhanacademy.org\nScratch.MIT.edu\nnot a domain\nevil.com/../x\n' >"$tmp/lists/emma"
@@ -69,7 +75,15 @@ grep -qx "\-m u:emma:--- -- $tmp/socket" "$tmp/setfacl" || fail "resolved's sock
 grep -qx "\-x u:zoe -- $tmp/socket" "$tmp/setfacl" || fail "and given back to someone whose list is off"
 [[ $(cat "$tmp/chromium/web-allowlist.json") == '{"DnsOverHttpsMode": "off"}' ]] || fail "secure DNS in the browser is off while a list is on"
 [[ ! -e $tmp/missing ]] || fail "only browsers that are installed get a policy"
-pass "their DNS goes to it by uid, DNS-over-TLS and resolved's socket are closed to them, and browser secure DNS is off"
+grep -q '<policy user="emma">' "$tmp/dbus.conf" && grep -q 'deny send_destination="org.freedesktop.resolve1"' "$tmp/dbus.conf" && ! grep -q zoe "$tmp/dbus.conf" || fail "resolved's D-Bus API is closed to them alone" "$(cat "$tmp/dbus.conf")"
+grep -qx 'busctl ReloadConfig' "$tmp/busctl" || fail "the bus reloads its policy"
+[[ $(jq -c .policies.DNSOverHTTPS "$tmp/zen/policies.json") == '{"Enabled":false,"Locked":true}' && $(jq -r .policies.DontCheckDefaultBrowser "$tmp/zen/policies.json") == true ]] || fail "Firefox and Zen have secure DNS off and locked, keeping their other policies" "$(cat "$tmp/zen/policies.json")"
+pass "their DNS goes to it by uid; DNS-over-TLS, resolved's socket and its D-Bus API are closed to them; secure DNS is off in every browser"
+
+rm -f "$tmp/systemctl" "$tmp/ruleset" "$tmp/setfacl"
+apply --socket-only
+grep -qx "\-m u:emma:--- -- $tmp/socket" "$tmp/setfacl" && [[ ! -e $tmp/systemctl && ! -e $tmp/ruleset ]] || fail "--socket-only puts back only the socket's ACL"
+pass "after a resolved restart only the socket's ACL is put back, starting nothing"
 
 apply
 grep -qx 'start omarchy-web-allowlist@emma.service' "$tmp/systemctl" || fail "an unchanged list keeps its resolver running without a restart"
@@ -81,5 +95,6 @@ apply
 grep -qx 'stop omarchy-web-allowlist@emma.service' "$tmp/systemctl" || fail "turned off, the resolver stops"
 ! grep -q skuid "$tmp/ruleset" || fail "turned off, the redirect goes"
 [[ ! -e $tmp/chromium/web-allowlist.json ]] || fail "with no list on, browser secure DNS is theirs again"
+[[ ! -e $tmp/dbus.conf && $(jq -c '.policies | has("DNSOverHTTPS")' "$tmp/zen/policies.json") == false ]] || fail "with no list on, the D-Bus policy and Firefox's setting go"
 [[ ! -e $tmp/pacman ]] || fail "dnsmasq present, nothing is installed"
 pass "turned off, the resolver, the redirect and the browser policy all go"

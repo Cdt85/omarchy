@@ -15,8 +15,10 @@
 # on. A site reached by its bare IP address is not caught; this keeps a child
 # to the sites agreed on, it does not stop a determined one.
 #
-# Run whenever a list changes, at boot, and whenever resolved restarts, since
-# its socket comes back without the ACL.
+# Run whenever a list changes and at boot. --socket-only puts back just the
+# ACL on resolved's socket, which a resolved restart recreates without it: the
+# resolved drop-in runs that as root, and starting resolvers from there would
+# wait on resolved's own start.
 
 set -uo pipefail
 
@@ -25,6 +27,8 @@ set -uo pipefail
 : "${WEB_ALLOWLIST_RESOLVED_SOCKET:=/run/systemd/resolve/io.systemd.Resolve}"
 : "${WEB_ALLOWLIST_UPSTREAM:=127.0.0.53}"
 : "${WEB_ALLOWLIST_POLICY_DIRS:=/etc/chromium/policies/managed:/etc/opt/chrome/policies/managed:/etc/opt/edge/policies/managed:/etc/brave/policies/managed}"
+: "${WEB_ALLOWLIST_FIREFOX_DIRS:=/usr/lib/firefox/distribution:/opt/zen-browser/distribution}"
+: "${WEB_ALLOWLIST_DBUS_POLICY:=/etc/dbus-1/system.d/omarchy-web-allowlist.conf}"
 
 (( EUID == 0 )) || [[ -n ${WEB_ALLOWLIST_TESTING:-} ]] || { echo "omarchy-web-allowlist-apply must run as root." >&2; exit 1; }
 
@@ -92,8 +96,29 @@ ruleset() {
   echo "}"
 }
 
+# resolved's own socket, which would answer them without going through DNS.
+socket_acls() {
+  local list user
+  [[ -S $WEB_ALLOWLIST_RESOLVED_SOCKET || -n ${WEB_ALLOWLIST_TESTING:-} ]] || return 0
+  for list in "$WEB_ALLOWLIST_DIR"/*; do
+    [[ -f $list ]] || continue
+    user=${list##*/}
+    getent passwd "$user" >/dev/null || continue
+    if grep -q "^$user " <<<"$enabled"; then
+      setfacl -m "u:$user:---" -- "$WEB_ALLOWLIST_RESOLVED_SOCKET" || status=1
+    else
+      setfacl -x "u:$user" -- "$WEB_ALLOWLIST_RESOLVED_SOCKET" 2>/dev/null
+    fi
+  done
+}
+
 status=0
 enabled=$(enabled_users)
+
+if [[ ${1:-} == "--socket-only" ]]; then
+  socket_acls
+  exit "$status"
+fi
 
 if [[ -n $enabled ]] && ! command -v dnsmasq >/dev/null; then
   pacman -S --needed --noconfirm dnsmasq >/dev/null || { echo "Could not install dnsmasq for the web allowlist." >&2; exit 1; }
@@ -125,19 +150,31 @@ done
 # The redirect, replaced whole so a rule never outlives the list behind it.
 ruleset | nft -f - || status=1
 
-# resolved's own socket, which would answer them without going through DNS.
-if [[ -S $WEB_ALLOWLIST_RESOLVED_SOCKET || -n ${WEB_ALLOWLIST_TESTING:-} ]]; then
-  for list in "$WEB_ALLOWLIST_DIR"/*; do
-    [[ -f $list ]] || continue
-    user=${list##*/}
-    getent passwd "$user" >/dev/null || continue
-    if grep -q "^$user " <<<"$enabled"; then
-      setfacl -m "u:$user:---" -- "$WEB_ALLOWLIST_RESOLVED_SOCKET" || status=1
-    else
-      setfacl -x "u:$user" -- "$WEB_ALLOWLIST_RESOLVED_SOCKET" 2>/dev/null
-    fi
-  done
+socket_acls
+
+# resolved also answers over D-Bus, sending the lookup as itself; a person
+# with the list on may not ask it there.
+if [[ -n $enabled ]]; then
+  {
+    echo '<!DOCTYPE busconfig PUBLIC "-//freedesktop//DTD D-BUS Bus Configuration 1.0//EN" "http://www.freedesktop.org/standards/dbus/1.0/busconfig.dtd">'
+    echo '<busconfig>'
+    while read -r user uid; do
+      [[ -n $user ]] && printf '  <policy user="%s">\n    <deny send_destination="org.freedesktop.resolve1"/>\n  </policy>\n' "$user"
+    done <<<"$enabled"
+    echo '</busconfig>'
+  } >"$WEB_ALLOWLIST_DBUS_POLICY.tmp"
+else
+  : >"$WEB_ALLOWLIST_DBUS_POLICY.tmp"
 fi
+if ! cmp -s "$WEB_ALLOWLIST_DBUS_POLICY.tmp" "$WEB_ALLOWLIST_DBUS_POLICY" 2>/dev/null; then
+  if [[ -s $WEB_ALLOWLIST_DBUS_POLICY.tmp ]]; then
+    chmod 644 "$WEB_ALLOWLIST_DBUS_POLICY.tmp" && mv -f "$WEB_ALLOWLIST_DBUS_POLICY.tmp" "$WEB_ALLOWLIST_DBUS_POLICY" || status=1
+  else
+    rm -f "$WEB_ALLOWLIST_DBUS_POLICY"
+  fi
+  busctl call org.freedesktop.DBus /org/freedesktop/DBus org.freedesktop.DBus ReloadConfig >/dev/null 2>&1 || status=1
+fi
+rm -f "$WEB_ALLOWLIST_DBUS_POLICY.tmp"
 
 # Secure DNS in the browser would go around the redirect.
 IFS=: read -ra policy_dirs <<<"$WEB_ALLOWLIST_POLICY_DIRS"
@@ -149,6 +186,20 @@ for dir in "${policy_dirs[@]}"; do
   else
     rm -f "$dir/web-allowlist.json"
   fi
+done
+
+# Firefox and Zen take DNS-over-HTTPS from their distribution policies, which
+# Omarchy installs; it is turned off and locked there too while a list is on.
+IFS=: read -ra firefox_dirs <<<"$WEB_ALLOWLIST_FIREFOX_DIRS"
+for dir in "${firefox_dirs[@]}"; do
+  policies=$dir/policies.json
+  [[ -f $policies && ! -L $policies ]] || continue
+  if [[ -n $enabled ]]; then
+    jq '.policies.DNSOverHTTPS = {"Enabled": false, "Locked": true}' "$policies" >"$policies.tmp"
+  else
+    jq 'if .policies.DNSOverHTTPS == {"Enabled": false, "Locked": true} then del(.policies.DNSOverHTTPS) else . end' "$policies" >"$policies.tmp"
+  fi && { cmp -s "$policies.tmp" "$policies" || { chmod 644 "$policies.tmp" && mv -f "$policies.tmp" "$policies"; }; } || status=1
+  rm -f "$policies.tmp"
 done
 
 exit "$status"

@@ -27,6 +27,8 @@ fi
 : "${USERS_APPS_APPLY:=/usr/bin/omarchy-user-apps-apply}"
 : "${USERS_REBUILD_BOOT:=limine-mkinitcpio}"
 : "${USERS_SCREEN_TIME_ADMIN:=/usr/bin/omarchy-screen-time-admin}"
+: "${USERS_WEB_DIR:=/etc/omarchy/web-allowlist}"
+: "${USERS_WEB_APPLY:=/usr/bin/omarchy-web-allowlist-apply}"
 : "${USERS_THEME_SETTINGS:=/etc/omarchy/theme-collections}"
 : "${USERS_THEME_COLLECTIONS:=/usr/share/omarchy/default/omarchy/theme-collections}"
 
@@ -552,9 +554,29 @@ users_add() {
   fi
 }
 
+# A child's own password change says whether a password is somebody else's,
+# so it would be a way to test guesses at a grown-up's; three tries an hour,
+# counted whether or not they go through, keeps it no faster than the lock.
+users_password_self_allowed() {
+  local uid state now recent
+  uid=$(id -u -- "$1") || return 1
+  users_make_dir "$USERS_RATE_DIR" 700 || return 1
+  state=$USERS_RATE_DIR/password-self-$uid
+  now=$(date +%s)
+  recent=$([[ -f $state ]] && awk -v since=$(( now - 3600 )) '$1 > since' "$state")
+  if (( $(grep -c . <<<"$recent") >= 3 )); then
+    users_say "That's three password changes this hour. Try again later, or ask a grown-up."
+    return 1
+  fi
+  { [[ -n $recent ]] && printf '%s\n' "$recent"; echo "$now"; } >"$state"
+}
+
 users_password() {
   local caller=$1 name=$2 password=$3 caller_password=$4 slot=- old_slot=- accounts
   users_exists "$name" || { users_say "There is no user named $name."; return 1; }
+  if [[ $name == "$caller" && $(users_role "$caller") == "child" ]]; then
+    users_password_self_allowed "$caller" || return 1
+  fi
   users_authenticate "$caller" "$caller_password" || return 1
   if [[ $name != "$caller" ]]; then
     users_require_adult "$caller" || return 1
@@ -701,6 +723,11 @@ users_finish() {
         rm -f "$USERS_BLOCKED_DIR/$user" && "$USERS_APPS_APPLY" || return 1
       fi
       rm -f "$USERS_THEME_SETTINGS/$user" || return 1
+      # Their web allowlist too, whose rules match their uid, which a later
+      # account can be given.
+      if [[ -f $USERS_WEB_DIR/$user ]]; then
+        rm -f "$USERS_WEB_DIR/$user" && "$USERS_WEB_APPLY" || return 1
+      fi
       "$USERS_SCREEN_TIME_ADMIN" remove "$user" >/dev/null 2>&1 || true
       uid=$(users_journal_get uid)
       if [[ $uid =~ ^[0-9]+$ ]]; then

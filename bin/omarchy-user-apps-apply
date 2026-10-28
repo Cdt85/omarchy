@@ -72,9 +72,23 @@ entry_program() {
   echo "$path"
 }
 
-# "<user> <path>" for every program a list blocks, once each.
+# A program's own directory, where a launcher in /usr/bin often hands off to
+# the real binary (/usr/bin/chromium runs /usr/lib/chromium/chromium): denied
+# with it, or the real one runs by its full path.
+program_dirs() {
+  local name=${1##*/} root dir
+  local IFS=:
+  for root in $APPS_SYSTEM_ROOTS; do
+    for dir in "$root/lib/$name" "$root/$name"; do
+      [[ -d $dir && ! -L $dir ]] && echo "$dir"
+    done
+  done
+}
+
+# "<user> <path>" for every program a list blocks, and its own directory, once
+# each.
 desired() {
-  local list user id file program
+  local list user id file program dir
   for list in "$APPS_BLOCKED_DIR"/*; do
     [[ -f $list ]] || continue
     user=${list##*/}
@@ -84,6 +98,9 @@ desired() {
       file=$(desktop_file "$id") || continue
       program=$(entry_program "$file") || continue
       printf '%s %s\n' "$user" "$program"
+      for dir in $(program_dirs "$program"); do
+        printf '%s %s\n' "$user" "$dir"
+      done
     done <"$list"
   done | sort -u
 }

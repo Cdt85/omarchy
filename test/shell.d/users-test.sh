@@ -183,6 +183,11 @@ case $1 in
 esac
 SH
 
+fake fake-web-apply <<'SH'
+#!/bin/bash
+echo applied >>"$TEST_TMP/web-applied"
+SH
+
 fake fake-screen-time <<'SH'
 #!/bin/bash
 echo "$*" >>"$TEST_TMP/screen-time"
@@ -201,7 +206,7 @@ SH
 export PATH="$tmp/bin:$PATH"
 
 reset_system() {
-  rm -rf "$tmp/etc" "$tmp/var"
+  rm -rf "$tmp/etc" "$tmp/var" "$tmp/run/rate"
   rm -f "$tmp/homes-removed" "$tmp/loginctl" "$tmp/usermod" "$tmp/apps-applied" "$tmp/rebuilt" "$tmp/screen-time"
   printf 'root:x:0:0::/root:/bin/bash\nnobody:x:65534:65534::/:/usr/bin/nologin\ndhh:x:1000:1000::/home/dhh:/bin/bash\n' >"$tmp/passwd"
   printf 'root:x:0:\nwheel:x:998:dhh\ndhh:x:1000:\n' >"$tmp/group"
@@ -223,7 +228,7 @@ users() {
   (
     umask 077   # as the helper runs
     export USERS_DIR=$tmp/etc/omarchy/users USERS_JOURNAL=$tmp/var/journal USERS_LOCK=$tmp/run/lock
-    export USERS_SHADOW=$tmp/shadow USERS_SUDOERS_DIR=$tmp/etc/sudoers.d USERS_LIFECYCLE_DISPATCH=omarchy-lifecycle-dispatch USERS_REFUSAL_DELAY=0 USERS_SDDM_CONF=$tmp/etc/sddm.conf USERS_BLOCKED_DIR=$tmp/etc/omarchy/blocked-apps USERS_BLOCKED_DEFAULT=$ROOT/default/omarchy/child-blocked-apps USERS_APPS_APPLY=omarchy-user-apps-apply USERS_REBUILD_BOOT=fake-rebuild USERS_SCREEN_TIME_ADMIN=fake-screen-time USERS_THEME_SETTINGS=$tmp/etc/omarchy/theme-collections USERS_THEME_COLLECTIONS=$ROOT/default/omarchy/theme-collections USERS_RATE_DIR=$tmp/run/rate
+    export USERS_SHADOW=$tmp/shadow USERS_SUDOERS_DIR=$tmp/etc/sudoers.d USERS_LIFECYCLE_DISPATCH=omarchy-lifecycle-dispatch USERS_REFUSAL_DELAY=0 USERS_SDDM_CONF=$tmp/etc/sddm.conf USERS_BLOCKED_DIR=$tmp/etc/omarchy/blocked-apps USERS_BLOCKED_DEFAULT=$ROOT/default/omarchy/child-blocked-apps USERS_APPS_APPLY=omarchy-user-apps-apply USERS_REBUILD_BOOT=fake-rebuild USERS_SCREEN_TIME_ADMIN=fake-screen-time USERS_WEB_DIR=$tmp/etc/omarchy/web-allowlist USERS_WEB_APPLY=fake-web-apply USERS_THEME_SETTINGS=$tmp/etc/omarchy/theme-collections USERS_THEME_COLLECTIONS=$ROOT/default/omarchy/theme-collections USERS_RATE_DIR=$tmp/run/rate
     mkdir -p "$USERS_SUDOERS_DIR"
     source "$ROOT/bin/omarchy-user-functions"
     users_load_drive
@@ -608,3 +613,24 @@ users users_add dhh adult bob bobpass1 ownerpw 2>/dev/null
 users users_delete dhh emma ownerpw yes 2>/dev/null
 [[ $(tail -1 "$tmp/screen-time") == "remove emma" ]] || fail "a deleted child leaves screen time"
 pass "a new child is under screen time from the start, and leaves it when deleted"
+
+# --- Web allowlist on delete ---
+
+reset_system
+users users_add dhh child emma kidpass ownerpw 2>/dev/null
+mkdir -p "$tmp/etc/omarchy/web-allowlist" && printf 'on\nkhanacademy.org\n' >"$tmp/etc/omarchy/web-allowlist/emma"
+rm -f "$tmp/web-applied"
+users users_delete dhh emma ownerpw yes 2>/dev/null
+[[ ! -e $tmp/etc/omarchy/web-allowlist/emma && -s $tmp/web-applied ]] || fail "a deleted child's web allowlist and its rules go with them"
+pass "deleting someone takes their web allowlist and its uid's rules with them"
+
+# --- A child's own password changes are rate-limited ---
+
+reset_system
+users users_add dhh child emma kidpass ownerpw 2>/dev/null
+users users_password emma emma kidpass2 kidpass 2>/dev/null || fail "a child changes their password"
+users users_password emma emma ownerpw kidpass2 2>/dev/null && fail "a grown-up's password is refused as a child's new one"
+users users_password emma emma kidpass3 kidpass2 2>/dev/null || fail "a third change in the hour goes through"
+expect_refused "a fourth try in an hour is refused" "three password changes this hour" users_password emma emma kidpass4 kidpass3
+users users_password dhh emma reset123 ownerpw 2>/dev/null || fail "a grown-up still resets a child's password"
+pass "a child's own password changes are three an hour, refused tries included, so they test nobody's password quickly"

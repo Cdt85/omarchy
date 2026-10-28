@@ -105,7 +105,7 @@ Panel {
     return fmt(remaining)
   }
 
-  readonly property string clientPath: "omarchy-screen-time"
+  readonly property string clientPath: "/usr/bin/omarchy-screen-time"
 
   // --- quiz state -----------------------------------------------------
 

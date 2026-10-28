@@ -56,7 +56,7 @@ Item {
 
   // The client is on PATH: the daemon publishes under /run and the client
   // reads it, so `watch` is one process per shell, not a socket.
-  readonly property string clientPath: "omarchy-screen-time"
+  readonly property string clientPath: "/usr/bin/omarchy-screen-time"
 
   function applyEvent(event) {
     if (!event || event.ok !== true) {

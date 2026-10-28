@@ -122,7 +122,7 @@ Item {
   function run(password) {
     actionProc.secret = password
     actionProc.label = pendingLabel
-    actionProc.command = ["omarchy-screen-time", "--password-stdin"].concat(pendingArgs)
+    actionProc.command = ["/usr/bin/omarchy-screen-time", "--password-stdin"].concat(pendingArgs)
     actionProc.running = true
   }
 
@@ -205,7 +205,7 @@ Item {
   SettingsWindow {
     id: settingsWindow
     service: root.statusService
-    clientPath: "omarchy-screen-time"
+    clientPath: "/usr/bin/omarchy-screen-time"
   }
 
   IpcHandler {

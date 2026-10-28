@@ -184,3 +184,21 @@ reply=$({ printf 'blue kettle\n'; printf '{"enabled": true, "domains": ["Scratch
 reply=$({ printf 'blue kettle\n'; printf '{"enabled": false, "domains": ["scratch.mit.edu"]}'; } | ctl web set)
 [[ $(head -1 "$tmp_dir/web/kid") == "off" && $(jq -r .enabled <<<"$reply") == false ]] || fail "a grown-up turns it off and keeps the list" "got: $reply"
 pass "a grown-up turns the allowlist on, starting from the shipped sites, keeps only real domains, and turns it off again"
+
+# A patch let through without a password in agreement mode, held open while a
+# grown-up switches the profile to limits, is refused when it lands.
+write_config together
+fifo=$tmp_dir/held
+mkfifo "$fifo"
+ctl config patch <"$fifo" >"$tmp_dir/held.out" &
+held=$!
+exec {hold}>"$fifo"
+printf '\n' >&$hold
+sleep 1
+write_config limits
+printf '{"philosophy": "together"}' >&$hold
+exec {hold}>&-
+wait "$held"
+[[ $(jq -r .error "$tmp_dir/held.out") == bad_password ]] || fail "a held agreement-mode patch is refused once the profile is limits" "$(cat "$tmp_dir/held.out")"
+[[ $(st_config | st_jq -r --arg u kid 'profile_for($u).profile.philosophy') == limits ]] || fail "the grown-up's switch to limits stands"
+pass "a patch let in by agreement mode and held open is refused if a grown-up switched to limits meanwhile"

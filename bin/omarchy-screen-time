@@ -18,7 +18,11 @@
 # echo.
 set -uo pipefail
 
-source omarchy-screen-time-lib
+# A grown-up's password passes through here, so nothing found on the account's
+# own PATH runs, and the library is the one installed beside this command.
+export PATH=/usr/bin
+self=$(readlink -e -- "${BASH_SOURCE[0]}")
+source "${self%/*}/omarchy-screen-time-lib"
 
 # The package path, spelled the way etc/sudoers.d/omarchy-screen-time spells
 # it: sudo matches the command by that exact path, so a dev-linked checkout

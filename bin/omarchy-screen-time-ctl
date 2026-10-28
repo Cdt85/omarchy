@@ -63,9 +63,10 @@ check_password() {
   IFS= read -r password || password=""
   # Agreement mode has nothing to gate: no budget, no grants, and an
   # agreement meant to be written together.
+  password_checked=false
   [[ $together == true && ${1:-} != --always ]] && return 0
   USERS_RETRY_IN=0
-  users_adult_check "$user" "$password" 2>/dev/null && return 0
+  users_adult_check "$user" "$password" 2>/dev/null && { password_checked=true; return 0; }
   if ((USERS_RETRY_IN > 0)); then
     fail_with "$(jq -nc --argjson w "$USERS_RETRY_IN" '{ok: false, error: "locked_out", retry_in_seconds: $w}')"
   fi
@@ -229,17 +230,33 @@ config_write() {
   if [[ $mode == set ]]; then check_password --always; else check_password; fi
   incoming=$(cat)
   jq -e 'type == "object"' <<<"$incoming" >/dev/null 2>&1 || fail bad_json
+  merged=$(st_with_lock commit_config "$mode" "$incoming") || fail "${merged:-save_failed}"
+  st_poke_daemon
+  jq -c '. + {ok: true}' <<<"$merged"
+}
+
+# Under the state lock, against the config as it is now rather than as it was
+# before the request's stdin closed: a patch let through without a password
+# because the profile was in agreement mode is refused if a grown-up has
+# switched it to limits since.
+commit_config() {
+  local mode=$1 incoming=$2 current merged
+  current=$(st_config)
+  if [[ $password_checked != true ]] &&
+    [[ $(st_jq --arg u "$user" 'profile_for($u).profile.philosophy == "together"' <<<"$current") != true ]]; then
+    echo bad_password
+    return 1
+  fi
   if [[ $mode == patch ]]; then
     merged=$(st_jq --argjson p "$incoming" --arg key "$key" \
-      '.profiles[$key] = (.profiles[$key] // {} | deep_merge($p))' <<<"$config")
+      '.profiles[$key] = (.profiles[$key] // {} | deep_merge($p))' <<<"$current")
   else
     merged=$incoming
   fi
-  merged=$(jq --argjson keep "$(jq -c '{users}' <<<"$config")" '. + $keep' <<<"$merged")
+  merged=$(jq --argjson keep "$(jq -c '{users}' <<<"$current")" '. + $keep' <<<"$merged")
   NEW_CONFIG=$merged
-  st_with_lock save_new_config || fail save_failed
-  st_poke_daemon
-  jq -c '. + {ok: true}' <<<"$merged"
+  save_new_config || { echo save_failed; return 1; }
+  printf '%s' "$merged"
 }
 
 # agreement mode ------------------------------------------------------------------------

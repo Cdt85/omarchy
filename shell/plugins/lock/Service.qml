@@ -610,7 +610,7 @@ Item {
   Process {
     id: adultCheck
     property string secret: ""
-    command: ["sudo", "-n", "/usr/bin/omarchy-user-helper", "adult-check"]
+    command: ["/usr/bin/sudo", "-n", "/usr/bin/omarchy-user-helper", "adult-check"]
     stdinEnabled: true
     onStarted: {
       write(secret + "\n")

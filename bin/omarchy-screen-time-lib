@@ -423,6 +423,22 @@ st_as_user() {
   fi
 }
 
+st_shell_trusted() {
+  # $1 uid. The shell's socket lives in the account's own runtime dir, where a
+  # script of theirs could answer "locked" in its place and stop the clock; so
+  # an answer counts only when every listener on those sockets is the real
+  # Quickshell. A child running Quickshell with a config of their own still
+  # could, which only something outside their session would stop.
+  local uid=$1 line pid exe trusted=${OMARCHY_SCREEN_TIME_SHELL_EXE:-/usr/bin/quickshell}
+  while IFS= read -r line; do
+    [[ $line == *"/run/user/$uid/omarchy-shell-"* ]] || continue
+    pid=$(grep -o 'pid=[0-9]*' <<<"$line" | head -1 | cut -d= -f2)
+    [[ $pid =~ ^[0-9]+$ ]] || return 1
+    exe=$(readlink -e "/proc/$pid/exe" 2>/dev/null) || return 1
+    [[ $exe == "$trusted" ]] || return 1
+  done < <(ss -xlpn 2>/dev/null)
+}
+
 st_session_info() {
   # $1 uid. Prints "present active locked session_id" for the account's
   # graphical session, the active one first if there are several.
@@ -449,7 +465,7 @@ st_session_info() {
     fi
     [[ $active == yes ]] && break
   done
-  if [[ $present == true ]]; then
+  if [[ $present == true ]] && st_shell_trusted "$uid"; then
     case "$(st_as_user "$uid" omarchy-shell lock isLocked 2>/dev/null | tr '[:upper:]' '[:lower:]')" in
       true) locked=true ;;
     esac

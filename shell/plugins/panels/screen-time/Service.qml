@@ -1,6 +1,7 @@
 import QtQuick
 import Quickshell
 import Quickshell.Io
+import qs.Commons
 
 // The single connection to the screen time daemon. The bar widget, the
 // countdown window and the parent service all read their state from here,
@@ -97,17 +98,31 @@ Item {
     reflections = Array.isArray(event.reflections) ? event.reflections : []
   }
 
-  // An account is under screen time exactly when it is in this group, and
-  // membership only changes at the next login, so asking once is enough.
+  // An account is under screen time exactly when it is in this group. The
+  // session's groups are fixed at login, so one put under it since is told by
+  // omarchy-screen-time-admin through enroll below.
   property bool member: false
+
+  function enroll() {
+    root.member = true
+    if (!watchProc.running) watchProc.running = true
+  }
+
+  ShellIpc {
+    target: "screen-time"
+
+    function enroll(): string {
+      root.enroll()
+      return "ok"
+    }
+  }
 
   Process {
     command: ["id", "-nG"]
     running: true
     stdout: StdioCollector {
       onStreamFinished: {
-        root.member = String(text || "").trim().split(/\s+/).indexOf("omarchy-screen-time") !== -1
-        if (root.member) watchProc.running = true
+        if (String(text || "").trim().split(/\s+/).indexOf("omarchy-screen-time") !== -1) root.enroll()
       }
     }
   }

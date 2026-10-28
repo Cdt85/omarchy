@@ -140,6 +140,7 @@ cmd_add() {
   fi
   NAME=$name P=${profile:-} edit_config '.users[$ENV.NAME] = {profile: (if $ENV.P == "" then .active_profile else $ENV.P end)}'
   usermod -aG "$ST_GROUP" "$name"
+  st_tell_shell_enrolled "$(st_uid_of "$name")"
   echo "$name is limited under profile $(st_config | jq -r --arg n "$name" '.users[$n].profile')"
   if [[ $(systemctl is-active "$UNIT" 2>/dev/null || true) != active ]]; then
     echo "the daemon is not running: sudo omarchy-screen-time-admin on"

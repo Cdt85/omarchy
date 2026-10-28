@@ -108,3 +108,14 @@ chmod +x "$french_date/date"
 [[ $(PATH="$french_date:$PATH" st_weekday_key 0) == "thu" ]] || fail "the weekday key ignores the locale"
 rm -rf "$french_date"
 pass "the weekday key ignores the locale"
+
+# Putting a signed-in account under screen time tells its running shell, whose
+# groups were fixed at login.
+told=$(mktemp -d)
+printf '#!/bin/bash\necho "$*" >>"%s/calls"\necho ok\n' "$told" >"$told/omarchy-shell"
+chmod +x "$told/omarchy-shell"
+OMARCHY_SCREEN_TIME_PATH="$told" st_tell_shell_enrolled "$(id -u)"
+[[ $(cat "$told/calls") == "-q screen-time enroll" ]] || fail "the running shell is told the account is under screen time" "$(cat "$told/calls" 2>/dev/null)"
+OMARCHY_SCREEN_TIME_PATH="$told/none" st_tell_shell_enrolled "$(id -u)" || fail "no shell to tell is not a failure"
+rm -rf "$told"
+pass "a running shell is told when its account comes under screen time"

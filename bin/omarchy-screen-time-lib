@@ -423,6 +423,13 @@ st_as_user() {
   fi
 }
 
+st_tell_shell_enrolled() {
+  # $1 uid. A shell already running asked once at login whether the account
+  # was under screen time; tell it the answer changed, so the widget and the
+  # grown-ups' controls arrive now rather than at the next login.
+  st_as_user "$1" omarchy-shell -q screen-time enroll >/dev/null 2>&1 || true
+}
+
 st_shell_trusted() {
   # $1 uid. The shell's socket lives in the account's own runtime dir, where a
   # script of theirs could answer "locked" in its place and stop the clock; so

@@ -355,6 +355,14 @@ Item {
       icon: "\uf1ab",
       volatile: true,
       actionFor: function(value) { return "omarchy-language " + Util.shellQuote(value) }
+    },
+    // People with an account; the ✓ marks you. A child sees only themselves,
+    // since only their own password is theirs to change.
+    "users": {
+      script: "me=$(id -un); adult=0; [[ \" $(id -nG) \" == *' wheel '* ]] && adult=1; omarchy-user-list 2>/dev/null | while read -r name _; do [[ -z $name ]] && continue; (( adult )) || [[ $name == \"$me\" ]] || continue; printf '%s\\t%s\\t%s\\n' \"$name\" \"$name\" \"$me\"; done",
+      icon: "\uf007",
+      volatile: true,
+      actionFor: function(value) { return "omarchy-launch-floating-terminal-with-presentation " + Util.shellQuote("omarchy-user-manage " + Util.shellQuote(value)) }
     }
   })
 

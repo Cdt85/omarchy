@@ -105,7 +105,7 @@ Panel {
     return fmt(remaining)
   }
 
-  readonly property string clientPath: "/usr/bin/omarchy-screen-time"
+  readonly property string clientPath: "omarchy-screen-time"
 
   // --- quiz state -----------------------------------------------------
 
@@ -339,7 +339,7 @@ Panel {
       font.pixelSize: Style.font.caption
       Behavior on color {
         enabled: !root.bar || root.bar.foregroundAnimationEnabled
-        ColorAnimation { duration: 160 }
+        ColorAnimation { duration: Style.duration(160) }
       }
     }
 
@@ -353,7 +353,7 @@ Panel {
       font.pixelSize: Style.font.body
       Behavior on color {
         enabled: !root.bar || root.bar.foregroundAnimationEnabled
-        ColorAnimation { duration: 160 }
+        ColorAnimation { duration: Style.duration(160) }
       }
     }
   }
@@ -446,18 +446,18 @@ Panel {
               transformOrigin: Item.Center
 
               Behavior on flip {
-                NumberAnimation { duration: 900; easing.type: Easing.InOutBack }
+                NumberAnimation { duration: Style.duration(900); easing.type: Easing.InOutBack }
               }
 
               SequentialAnimation {
                 id: flipSquash
                 NumberAnimation {
                   target: heroIcon; property: "scale"
-                  to: 0.8; duration: 450; easing.type: Easing.OutQuad
+                  to: 0.8; duration: Style.duration(450); easing.type: Easing.OutQuad
                 }
                 NumberAnimation {
                   target: heroIcon; property: "scale"
-                  to: 1.0; duration: 450; easing.type: Easing.OutBack
+                  to: 1.0; duration: Style.duration(450); easing.type: Easing.OutBack
                 }
               }
 
@@ -562,7 +562,7 @@ Panel {
             NumberAnimation on drift {
               from: 0
               to: dayBar.pitch
-              duration: 2200
+              duration: Style.duration(2200)
               loops: Animation.Infinite
               // Only while time is actually being used up, and only while
               // somebody is looking: a drifting pattern behind a closed panel
@@ -578,7 +578,7 @@ Panel {
               width: parent.width * dayBar.fraction
 
               Behavior on width {
-                NumberAnimation { duration: 300; easing.type: Easing.OutCubic }
+                NumberAnimation { duration: Style.duration(300); easing.type: Easing.OutCubic }
               }
 
               // The base tint under the hatching.
@@ -780,7 +780,7 @@ Panel {
                   onClicked: root.forgetNote(noteRow.modelData.t)
 
                   Behavior on opacity {
-                    NumberAnimation { duration: 120 }
+                    NumberAnimation { duration: Style.duration(120) }
                   }
                 }
 

@@ -415,7 +415,7 @@ Item {
             color: cell.on
               ? Qt.rgba(Color.accent.r, Color.accent.g, Color.accent.b, cellArea.containsMouse ? 0.3 : 0.22)
               : (cellArea.containsMouse ? root.fadeText(0.9) : "transparent")
-            Behavior on color { ColorAnimation { duration: 100 } }
+            Behavior on color { ColorAnimation { duration: Style.duration(100) } }
           }
 
           // A hairline between the cells, except before the first.
@@ -501,7 +501,7 @@ Item {
             color: number.activeFocus
               ? Qt.rgba(Color.accent.r, Color.accent.g, Color.accent.b, 0.18)
               : (cellArea.containsMouse ? root.fadeText(0.9) : "transparent")
-            Behavior on color { ColorAnimation { duration: 100 } }
+            Behavior on color { ColorAnimation { duration: Style.duration(100) } }
           }
 
           Rectangle {
@@ -617,7 +617,7 @@ Item {
             color: clock.activeFocus
               ? Qt.rgba(Color.accent.r, Color.accent.g, Color.accent.b, 0.18)
               : (cellArea.containsMouse ? root.fadeText(0.9) : "transparent")
-            Behavior on color { ColorAnimation { duration: 100 } }
+            Behavior on color { ColorAnimation { duration: Style.duration(100) } }
           }
 
           Rectangle {
@@ -726,7 +726,7 @@ Item {
         : (boxArea.containsMouse ? root.fadeText(0.9) : "transparent")
       border.width: 1
       border.color: field.activeFocus ? Color.accent : root.fadeText(0.75)
-      Behavior on color { ColorAnimation { duration: 100 } }
+      Behavior on color { ColorAnimation { duration: Style.duration(100) } }
 
       TextInput {
         id: field

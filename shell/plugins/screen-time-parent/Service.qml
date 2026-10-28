@@ -164,9 +164,9 @@ Item {
 
   SequentialAnimation {
     id: shake
-    NumberAnimation { target: root; property: "shakeOffset"; to: -8; duration: 35; easing.type: Easing.OutQuad }
-    NumberAnimation { target: root; property: "shakeOffset"; to: 8; duration: 50; easing.type: Easing.InOutQuad }
-    NumberAnimation { target: root; property: "shakeOffset"; to: 0; duration: 55; easing.type: Easing.OutQuad }
+    NumberAnimation { target: root; property: "shakeOffset"; to: -8; duration: Style.duration(35); easing.type: Easing.OutQuad }
+    NumberAnimation { target: root; property: "shakeOffset"; to: 8; duration: Style.duration(50); easing.type: Easing.InOutQuad }
+    NumberAnimation { target: root; property: "shakeOffset"; to: 0; duration: Style.duration(55); easing.type: Easing.OutQuad }
   }
 
   Process {
@@ -208,7 +208,7 @@ Item {
     clientPath: "/usr/bin/omarchy-screen-time"
   }
 
-  IpcHandler {
+  ShellIpc {
     target: "screen-time-parent"
 
     function open(): string {
@@ -356,7 +356,7 @@ Item {
           border.width: 1
           border.color: root.errorFlash ? Color.polkit.textError
             : (passwordInput.activeFocus ? root.accent : Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.25))
-          Behavior on color { ColorAnimation { duration: 100 } }
+          Behavior on color { ColorAnimation { duration: Style.duration(100) } }
 
           TextInput {
             id: passwordInput
@@ -461,7 +461,7 @@ Item {
                         ? Qt.rgba(root.accent.r, root.accent.g, root.accent.b, 0.3)
                         : (minuteArea.containsMouse || minuteCell.activeFocus
                            ? Qt.rgba(root.accent.r, root.accent.g, root.accent.b, 0.14) : "transparent")
-                      Behavior on color { ColorAnimation { duration: 80 } }
+                      Behavior on color { ColorAnimation { duration: Style.duration(80) } }
                     }
 
                     Rectangle {

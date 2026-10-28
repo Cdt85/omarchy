@@ -57,5 +57,5 @@ while IFS= read -r label; do
 done < <([[ -n $chosen ]] && printf '%s\n' "$chosen")
 
 mine=$(user_prompt_own_password "$(omarchy-i18n users.yourPassword)") || exit 1
-{ printf '%s\n' "$mine"; (( ${#choice_ids[@]} )) && printf '%s\n' "${choice_ids[@]}"; } |
-  user_helper "$(omarchy-i18n --count "${#choice_ids[@]}" users.appsBlocked "$name" "${#choice_ids[@]}")" sudo omarchy-user-helper apps "$name"
+{ printf '%s\n' "$mine"; if (( ${#choice_ids[@]} )); then printf '%s\n' "${choice_ids[@]}"; fi; } |
+  user_helper "$(omarchy-i18n --count "${#choice_ids[@]}" users.appsBlocked "$name" "${#choice_ids[@]}")" apps "$name"

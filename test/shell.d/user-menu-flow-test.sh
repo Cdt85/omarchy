@@ -37,13 +37,25 @@ urgency=normal
 while [[ $1 == -* ]]; do [[ $1 == -u ]] && urgency=$2; shift 2; done
 echo "$urgency $*" >>"$TEST_TMP/notified"
 SH
-# sudo -v checks the caller's own password; anything else runs as asked.
+# sudo as an adult has it: a password every time, read from stdin with -S, and
+# no approval carried between calls; -n runs only what needs none, as a
+# child's password-self grant does.
 fake sudo <<'SH'
 #!/bin/bash
-[[ $1 == -k || $1 == -K ]] && exit 0
-if [[ $1 == -S ]]; then IFS= read -r given; [[ $given == ownerpw ]]; exit; fi
-[[ $1 == -n ]] && shift
-exec "$@"
+[[ $# == 1 && ( $1 == -k || $1 == -K ) ]] && exit 0
+[[ $1 == -k ]] && shift
+if [[ $1 == -n ]]; then
+  shift
+  [[ $1 == omarchy-user-helper && $2 == password-self ]] && exec "$@"
+  exit 1
+fi
+if [[ $1 == -S ]]; then
+  shift; [[ $1 == -p ]] && shift 2
+  IFS= read -r given; [[ $given == ownerpw ]] || exit 1
+  [[ $1 == -v ]] && exit 0
+  exec "$@"
+fi
+exit 1
 SH
 fake omarchy-user-helper <<'SH'
 #!/bin/bash
@@ -99,3 +111,18 @@ run omarchy-user-themes '["Kids","General"]' ownerpw
 run omarchy-user-themes '[]'
 (( status != 0 )) && [[ ! -e $tmp/helper ]] && grep -q 'Pick at least one' "$tmp/notified" || fail "ticking nothing is refused"
 pass "Themes ticks collections in the menu, and ticking none is refused"
+
+run omarchy-user-apps '[]' ownerpw
+(( status == 0 )) && [[ $(cat "$tmp/helper") == $'args: apps emma\nownerpw' ]] || fail "unticking every app clears the list and succeeds" "status $status: $(cat "$tmp/helper" 2>/dev/null)"
+pass "unticking every app clears the list, and the command says it worked"
+
+# A child changing their own password goes through their passwordless grant,
+# with no password of theirs read by sudo.
+fake id <<'SH'
+#!/bin/bash
+case $1 in -un) echo emma ;; -nG) echo "emma omarchy-child" ;; *) exec /usr/bin/id "$@" ;; esac
+SH
+run_args=()
+run omarchy-user-password kidpass1 kidpass2 kidpass2
+(( status == 0 )) && [[ $(cat "$tmp/helper") == $'args: password-self\nkidpass1\nkidpass2' ]] || fail "a child's own change reaches password-self with their current and new password" "$(cat "$tmp/helper" 2>/dev/null)"
+pass "a child changes their own password through the passwordless grant"

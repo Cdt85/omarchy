@@ -28,4 +28,4 @@ else
 fi
 
 mine=$(user_prompt_own_password "$(omarchy-i18n users.yourPassword)") || exit 1
-printf '%s\n' "$mine" | user_helper "$(omarchy-i18n users.deleted "$name")" sudo omarchy-user-helper delete "$name" "${home_flag[@]}"
+printf '%s\n' "$mine" | user_helper "$(omarchy-i18n users.deleted "$name")" delete "$name" "${home_flag[@]}"

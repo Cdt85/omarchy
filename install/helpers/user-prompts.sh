@@ -73,12 +73,23 @@ user_prompt_own_password() {
   printf '%s' "$password"
 }
 
-# Runs the helper on this stdin and says how it went: $1 when it worked, and
-# what the helper said when it did not. The sudo prefix is the caller's.
+# Runs omarchy-user-helper with the arguments after $1 on this stdin, whose
+# first line is the caller's own password, and says how it went: $1 when it
+# worked, and what the helper said when it did not. With no terminal, sudo ties
+# an earlier approval to the process that asked, which this is not, so sudo
+# reads that first line itself, ahead of the helper. A child's password-self
+# grant asks for none.
 user_helper() {
-  local done=$1 output
+  local done=$1 input output
+  local sudo=(sudo -n)
   shift
-  if output=$("$@" 2>&1); then
+  input=$(cat; echo .)
+  input=${input%.}
+  if [[ $1 != "password-self" ]] && ! sudo -k -n true 2>/dev/null; then
+    sudo=(sudo -k -S -p '')
+    input="${input%%$'\n'*}"$'\n'"$input"
+  fi
+  if output=$(printf '%s' "$input" | "${sudo[@]}" omarchy-user-helper "$@" 2>&1); then
     user_say "$done"
   else
     user_problem "$(omarchy-i18n users.notChanged)" "$(tail -n 3 <<<"$output")"

@@ -35,4 +35,4 @@ mine=$(user_prompt_own_password "$(omarchy-i18n users.yourPassword)") || exit 1
 
 # Adding someone rebuilds the boot image, which takes a while.
 user_say "$(omarchy-i18n users.adding "$name")"
-printf '%s\n%s\n' "$mine" "$password" | user_helper "$(omarchy-i18n users.added "$name")" sudo omarchy-user-helper add "$role" "$name"
+printf '%s\n%s\n' "$mine" "$password" | user_helper "$(omarchy-i18n users.added "$name")" add "$role" "$name"

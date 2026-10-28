@@ -38,4 +38,4 @@ chosen=$(user_choose_many "$(omarchy-i18n users.themesFor "$name")" "${labels[@]
 [[ -n $chosen ]] || { user_problem "$(omarchy-i18n users.pickACollection)"; exit 1; }
 
 mine=$(user_prompt_own_password "$(omarchy-i18n users.yourPassword)") || exit 1
-{ printf '%s\n' "$mine"; tr '[:upper:]' '[:lower:]' <<<"$chosen"; } | user_helper "$(omarchy-i18n users.themesSet "$name")" sudo omarchy-user-helper themes "$name"
+{ printf '%s\n' "$mine"; tr '[:upper:]' '[:lower:]' <<<"$chosen"; } | user_helper "$(omarchy-i18n users.themesSet "$name")" themes "$name"

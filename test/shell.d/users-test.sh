@@ -546,7 +546,7 @@ SH
 reset_system
 users users_add dhh child emma kidpass ownerpw 2>/dev/null
 users users_adult_check emma ownerpw 2>/dev/null || fail "an adult's password opens a child's lock screen"
-grep -q "dhh's password unlocked emma's session" "$tmp/logger" || fail "an adult's unlock is logged"
+grep -q "accepted dhh's password in emma's session" "$tmp/logger" || fail "an adult's unlock is logged"
 if users users_adult_check emma kidpass 2>/dev/null; then fail "the child's own password is not a grown-up's"; fi
 if users users_adult_check dhh ownerpw 2>/dev/null; then fail "an adult's session does not take another adult's password through this"; fi
 pass "a child's lock screen opens with any adult's password, logged, and only a child's"

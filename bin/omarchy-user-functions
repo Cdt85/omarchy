@@ -827,7 +827,7 @@ users_adult_check_locked() {
   USERS_RETRY_IN=0
   if (( until > now )); then
     USERS_RETRY_IN=$(( until - now ))
-    logger -p auth.notice -t omarchy-user-helper "refused a grown-up's password on $caller's lock screen: locked out" 2>/dev/null || true
+    logger -p auth.notice -t omarchy-user-helper "refused a grown-up's password in $caller's session: locked out" 2>/dev/null || true
     sleep "$USERS_REFUSAL_DELAY"
     return 1
   fi
@@ -838,7 +838,7 @@ users_adult_check_locked() {
       # When, for screen time: an unlock at zero by a grown-up earns the room
       # to hand out minutes, one by the child does not.
       date +%s >"$USERS_RATE_DIR/adult-unlock-$uid"
-      logger -p auth.notice -t omarchy-user-helper "$adult's password unlocked $caller's session" 2>/dev/null || true
+      logger -p auth.notice -t omarchy-user-helper "accepted $adult's password in $caller's session" 2>/dev/null || true
       return 0
     fi
   done
@@ -850,7 +850,7 @@ users_adult_check_locked() {
     until=$(( now + wait ))
   fi
   printf '%s %s\n' "$failures" "$until" >"$state"
-  logger -p auth.notice -t omarchy-user-helper "refused a grown-up's password on $caller's lock screen" 2>/dev/null || true
+  logger -p auth.notice -t omarchy-user-helper "refused a grown-up's password in $caller's session" 2>/dev/null || true
   sleep "$USERS_REFUSAL_DELAY"
   return 1
 }

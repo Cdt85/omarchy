@@ -34,7 +34,7 @@ session=$(jq -r --arg user "$name" '.[] | select(.user == $user and .seat == "se
 # out frees it, so that is offered instead.
 if [[ -z $session ]] && jq -e '.[] | select(.tty == "tty1")' <<<"$sessions" >/dev/null; then
   omarchy-notification-send -u critical -g 󰍃 "$(omarchy-i18n users.logOutToSwitch "$name")" "$(omarchy-i18n users.logOutToSwitchBody "$name")" \
-    --exec "omarchy-system logout"
+    --exec omarchy-system logout
   exit 0
 fi
 

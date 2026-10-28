@@ -120,9 +120,12 @@ fake lsblk <<'SH'
 cat "$TEST_TMP/root-ancestry"
 SH
 
+# x86 resolves luks-slots to nothing; a platform that records slots prints
+# its recorder.
 fake omarchy-lifecycle-dispatch <<'SH'
 #!/bin/bash
-exit "${TEST_DISPATCH_STATUS:-3}"
+[[ -n ${TEST_SLOT_RECORDER:-} ]] && echo "$TEST_SLOT_RECORDER"
+exit 0
 SH
 
 # Key slots are lines of "<slot><TAB><password>".
@@ -281,7 +284,7 @@ expect_refused "a name with capitals is refused" "lowercase" users_add dhh child
 [[ $(wc -l <"$tmp/slots") == 2 ]] || fail "no refused add leaves a slot" "$(cat "$tmp/slots")"
 pass "passwords must be six characters and nobody else's, on the disk as well as in shadow; only adults add"
 
-TEST_DISPATCH_STATUS=0 expect_refused "a platform that records slots refuses a second person's slot" "boot checks" users_add dhh child five fivepass ownerpw
+TEST_SLOT_RECORDER=/usr/lib/omarchy-mac/luks-slots expect_refused "a platform that records slots refuses a second person's slot" "boot checks" users_add dhh child five fivepass ownerpw
 pass "a platform whose boot checks record key slots refuses another person's slot"
 
 users users_password emma emma newkid1 kidpass 2>"$tmp/err" || fail "a child changes their own password" "$(cat "$tmp/err")"

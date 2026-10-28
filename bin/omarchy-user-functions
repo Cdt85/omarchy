@@ -134,9 +134,11 @@ users_root_luks_device() {
 # Silicon) cannot take a slot for another person until their boot package
 # records one; adding it anyway would fail that check at the next boot.
 users_slot_recorder_present() {
-  local status=0
-  "$USERS_LIFECYCLE_DISPATCH" --resolve luks-slots >/dev/null 2>&1 || status=$?
-  (( status != 3 ))
+  local out status=0
+  # Resolved means a recorder is printed; x86 resolves to nothing, and a
+  # machine without its platform's boot package exits 3.
+  out=$("$USERS_LIFECYCLE_DISPATCH" --resolve luks-slots 2>/dev/null) || status=$?
+  (( status == 0 )) && [[ -n $out ]]
 }
 
 # Sets USERS_DRIVE (empty when / is not encrypted) and USERS_UUID.

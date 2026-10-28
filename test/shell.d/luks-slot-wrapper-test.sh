@@ -69,11 +69,14 @@ pass "an unlock at the console prompt, without Plymouth, is recorded too"
 "$busybox" ash -n "$wrapper" || fail "the wrapper parses under busybox ash"
 pass "the wrapper parses under the initramfs shell"
 
-# The baseline adds the hook after encrypt only once Setup > Users exists.
+# The hook follows encrypt only once Setup > Users exists, added last, after
+# a drop-in from before the baseline that sets HOOKS whole.
 hooks_for() {
   OMARCHY_USERS_DIR=$1 PATH="$tmp/nohw:$PATH" bash -uc "
     FILES=()
     source '$ROOT/etc/mkinitcpio.conf.d/00-omarchy-hooks.conf'
+    HOOKS=(base udev plymouth keyboard autodetect microcode modconf kms keymap consolefont block encrypt filesystems fsck btrfs-overlayfs)
+    source '$ROOT/etc/mkinitcpio.conf.d/zz-omarchy-luks-slot.conf'
     echo \"\${HOOKS[*]}\"
   "
 }

@@ -47,16 +47,15 @@ fi
 
 labels=()
 for id in "${ids[@]}"; do labels+=("${names[$id]}"); done
-selected=$(IFS=,; echo "${blocked[*]}")
-chosen=$(gum choose --no-limit --header "$(omarchy-i18n users.blockApps "$name")" --selected "$selected" "${labels[@]}") || exit 0
+chosen=$(user_choose_many "$(omarchy-i18n users.blockApps "$name")" "${labels[@]}" -- "${blocked[@]}") || exit 0
 
 choice_ids=()
 while IFS= read -r label; do
   for id in "${ids[@]}"; do
     [[ ${names[$id]} == "$label" ]] && choice_ids+=("$id")
   done
-done <<<"$chosen"
+done < <([[ -n $chosen ]] && printf '%s\n' "$chosen")
 
 mine=$(user_prompt_own_password "$(omarchy-i18n users.yourPassword)") || exit 1
-{ printf '%s\n' "$mine"; printf '%s\n' "${choice_ids[@]}"; } | sudo omarchy-user-helper apps "$name"
-echo "$(omarchy-i18n --count "${#choice_ids[@]}" users.appsBlocked "$name" "${#choice_ids[@]}")"
+{ printf '%s\n' "$mine"; (( ${#choice_ids[@]} )) && printf '%s\n' "${choice_ids[@]}"; } |
+  user_helper "$(omarchy-i18n --count "${#choice_ids[@]}" users.appsBlocked "$name" "${#choice_ids[@]}")" sudo omarchy-user-helper apps "$name"

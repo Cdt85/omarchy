@@ -14,11 +14,11 @@ mapfile -t others < <(omarchy-user-list | awk -v me="$me" '$1 != me { print $1 }
 name=${1:-}
 
 if (( ${#others[@]} == 0 )); then
-  echo "$(omarchy-i18n users.noOneElse)" >&2
+  omarchy-notification-send -g 󰀄 "$(omarchy-i18n users.noOneElse)"
   exit 1
 fi
 if [[ -z $name ]]; then
-  name=$(gum choose --header "$(omarchy-i18n users.switchTo)" "${others[@]}") || exit 0
+  name=$(omarchy-menu-select "$(omarchy-i18n users.switchTo)" "${others[@]}" -- --width 440) || exit 0
 fi
 if ! printf '%s\n' "${others[@]}" | grep -qx -- "$name"; then
   echo "There is no one else named $name." >&2

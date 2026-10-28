@@ -32,10 +32,10 @@ fi
 
 labels=()
 for collection in "${collections[@]}"; do labels+=("$(label "$collection")"); done
-selected=$(for collection in "${current[@]}"; do label "$collection"; done | paste -sd, -)
-chosen=$(gum choose --no-limit --header "$(omarchy-i18n users.themesFor "$name")" --selected "$selected" "${labels[@]}") || exit 0
-[[ -n $chosen ]] || { echo "$(omarchy-i18n users.pickACollection)" >&2; exit 1; }
+selected=()
+for collection in "${current[@]}"; do selected+=("$(label "$collection")"); done
+chosen=$(user_choose_many "$(omarchy-i18n users.themesFor "$name")" "${labels[@]}" -- "${selected[@]}") || exit 0
+[[ -n $chosen ]] || { user_problem "$(omarchy-i18n users.pickACollection)"; exit 1; }
 
 mine=$(user_prompt_own_password "$(omarchy-i18n users.yourPassword)") || exit 1
-{ printf '%s\n' "$mine"; tr '[:upper:]' '[:lower:]' <<<"$chosen"; } | sudo omarchy-user-helper themes "$name"
-echo "$(omarchy-i18n users.themesSet "$name")"
+{ printf '%s\n' "$mine"; tr '[:upper:]' '[:lower:]' <<<"$chosen"; } | user_helper "$(omarchy-i18n users.themesSet "$name")" sudo omarchy-user-helper themes "$name"

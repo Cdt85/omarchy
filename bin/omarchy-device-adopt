@@ -190,8 +190,10 @@ jq -n \
 [[ $new_hostname == "$device" ]] || rm -f "$inventory/$device.json"
 omarchy-device-ssh-config
 
-# The new name takes a moment to reach mDNS; check the owner's login by address.
-if ssh -o BatchMode=yes -o ConnectTimeout=10 -o HostName="$address" "$new_hostname" true; then
+# The new name takes a moment to reach mDNS; check the owner's login by
+# address, with the options the generated Host block gives ssh <name>.
+if ssh -p "$port" -i "${owner_key%.pub}" -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=10 \
+  -o HostKeyAlias="$new_hostname" -o UserKnownHostsFile="$known_hosts" "$user@$address" true; then
   echo "Adopted. Connect with: ssh $new_hostname"
 else
   fail "adopted, but $user could not log in to $address with ${owner_key%.pub}"

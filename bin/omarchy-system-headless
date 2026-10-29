@@ -1,0 +1,47 @@
+#!/bin/bash
+
+# omarchy:summary=Boot without the desktop (no SDDM or Hyprland), or back to it
+# omarchy:args=[on|off|status]
+# omarchy:examples=omarchy system headless on | omarchy system headless off
+# omarchy:requires-sudo=true
+
+# Headless boots to multi-user.target with SDDM disabled, for a machine used
+# over SSH. It takes effect at the next boot; a running desktop stays up.
+
+set -euo pipefail
+
+as_root() {
+  if ((EUID == 0)); then
+    "$@"
+  else
+    sudo "$@"
+  fi
+}
+
+headless() {
+  [[ $(systemctl get-default) == "multi-user.target" ]] && ! systemctl is-enabled --quiet sddm.service
+}
+
+case ${1:-status} in
+  on)
+    as_root systemctl disable sddm.service
+    as_root systemctl set-default multi-user.target
+    echo "Boots headless from the next boot"
+    ;;
+  off)
+    as_root systemctl enable sddm.service
+    as_root systemctl set-default graphical.target
+    echo "Boots to the desktop from the next boot"
+    ;;
+  status)
+    if headless; then
+      echo "headless"
+    else
+      echo "desktop"
+    fi
+    ;;
+  *)
+    echo "Usage: omarchy system headless [on|off|status]" >&2
+    exit 1
+    ;;
+esac

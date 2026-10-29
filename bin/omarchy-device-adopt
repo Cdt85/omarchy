@@ -176,6 +176,12 @@ if ! ssh "${ssh_options[@]}" "root@$address" test -f /var/lib/omarchy/provisioni
   fail "$device is not waiting for this computer: it needs an appliance install built with $adopt_key"
 fi
 
+# Named by --address, the device's advertisement was never read; ask it.
+if [[ $(jq -r '.platform // empty' <<<"$record") == "" ]] &&
+  described=$(ssh "${ssh_options[@]}" "root@$address" 'omarchy-hw-platform; cat /sys/class/dmi/id/product_name' 2>/dev/null); then
+  record=$(jq -R -s --argjson record "$record" 'split("\n") as $lines | $record + {platform: $lines[0], model: $lines[1]}' <<<"$described")
+fi
+
 ssh "${ssh_options[@]}" "root@$address" omarchy-provision-owner --from-file - <<<"$owner"
 
 jq -n \

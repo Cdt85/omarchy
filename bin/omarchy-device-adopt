@@ -1,0 +1,198 @@
+#!/bin/bash
+
+# omarchy:summary=Adopt a device waiting on the network: create its owner and finish its setup over SSH
+# omarchy:args=[device] [--hostname NAME] [--key PUBKEY] [--sudo password|passwordless] [--session headless|desktop] [...]
+# omarchy:examples=omarchy device adopt | omarchy device adopt spark-7649 --session desktop --sudo passwordless
+
+# A device waiting to be adopted is an appliance install built with this
+# computer's key (omarchy device key). Adopting logs in as root with that key,
+# creates the owner with omarchy-provision-owner --from-file, and leaves the
+# device reachable as ssh <hostname>. The owner, timezone and keyboard default
+# to this computer's; anything not given as an option is asked.
+
+set -euo pipefail
+
+inventory=${OMARCHY_DEVICES_DIR:-$HOME/.config/omarchy/devices}
+known_hosts=$inventory/known_hosts
+
+device="" address_override="" user="" full_name="" new_hostname="" timezone="" keyboard="" owner_key=""
+sudo_mode="" session="" password_stdin=false
+
+usage() {
+  echo "Usage: omarchy device adopt [device] [--address HOST[:PORT]] [--user NAME] [--full-name NAME] [--hostname NAME] [--timezone ZONE]" >&2
+  echo "         [--keyboard KEYMAP] [--key PUBKEY] [--sudo password|passwordless] [--session headless|desktop] [--password-stdin]" >&2
+  exit 1
+}
+
+fail() {
+  echo "Error: $*" >&2
+  exit 1
+}
+
+while (($# > 0)); do
+  case $1 in
+    --address) address_override=${2:-}; shift 2 ;;
+    --user) user=${2:-}; shift 2 ;;
+    --full-name) full_name=${2:-}; shift 2 ;;
+    --hostname) new_hostname=${2:-}; shift 2 ;;
+    --timezone) timezone=${2:-}; shift 2 ;;
+    --keyboard) keyboard=${2:-}; shift 2 ;;
+    --key) owner_key=${2:-}; shift 2 ;;
+    --sudo) sudo_mode=${2:-}; shift 2 ;;
+    --session) session=${2:-}; shift 2 ;;
+    --password-stdin) password_stdin=true; shift ;;
+    -h | --help) usage ;;
+    -*) usage ;;
+    *)
+      [[ -z $device ]] || usage
+      device=$1
+      shift
+      ;;
+  esac
+done
+
+interactive() { [[ -t 0 && -t 1 ]] && ! $password_stdin; }
+
+# ── Which device ─────────────────────────────────────────────────────────────
+
+waiting=$(omarchy-device-list --json | jq '[.[] | select(.state == "waiting")]')
+
+if [[ -z $device ]]; then
+  case $(jq length <<<"$waiting") in
+    0) fail "no devices are waiting to be adopted on this network" ;;
+    1) device=$(jq -r '.[0].name' <<<"$waiting") ;;
+    *)
+      interactive || fail "several devices are waiting; name one"
+      device=$(jq -r '.[] | .name' <<<"$waiting" | gum choose --header "Adopt which device?")
+      ;;
+  esac
+fi
+
+record=$(jq --arg name "$device" '.[] | select(.name == $name)' <<<"$waiting")
+[[ -n $record ]] || record=$(jq -n --arg name "$device" '{name: $name, host: "\($name).local"}')
+address=$(jq -r '.address // .host' <<<"$record")
+
+# Where mDNS does not reach (a network that blocks multicast, a VM behind NAT),
+# the device is named by address, and keeps that address and port afterwards.
+port=22
+if [[ -n $address_override ]]; then
+  address=${address_override%:*}
+  [[ $address_override != *:* ]] || port=${address_override##*:}
+  [[ $port =~ ^[0-9]+$ ]] || fail "invalid port in --address $address_override"
+fi
+
+# ── The owner ────────────────────────────────────────────────────────────────
+
+adopt_key=$(omarchy-device-key)
+
+ask() {
+  local value=$1 header=$2 default=$3
+  if [[ -n $value ]]; then
+    printf '%s\n' "$value"
+  elif interactive; then
+    gum input --header "$header" --value "$default"
+  else
+    printf '%s\n' "$default"
+  fi
+}
+
+choose() {
+  local value=$1 header=$2
+  shift 2
+  if [[ -n $value ]]; then
+    printf '%s\n' "$value"
+  elif interactive; then
+    gum choose --header "$header" "$@" | cut -d' ' -f1
+  else
+    printf '%s\n' "${1%% *}"
+  fi
+}
+
+local_keymap=$(sed -n 's/^KEYMAP=//p' /etc/vconsole.conf 2>/dev/null | tr -d '"')
+local_name=$(getent passwd "$USER" | cut -d: -f5 | cut -d, -f1)
+
+user=$(ask "$user" "Username on $device" "$USER")
+full_name=$(ask "$full_name" "Full name" "$local_name")
+new_hostname=$(ask "$new_hostname" "Hostname" "$device")
+timezone=$(ask "$timezone" "Timezone" "$(timedatectl show -p Timezone --value 2>/dev/null || echo UTC)")
+keyboard=$(ask "$keyboard" "Keyboard (console keymap)" "${local_keymap:-us}")
+
+if [[ -z $owner_key ]] && interactive; then
+  owner_key=$(
+    { printf '%s\n' "$adopt_key"; ls "$HOME"/.ssh/*.pub 2>/dev/null | grep -vxF "$adopt_key"; } |
+      gum choose --header "Key $user logs in with"
+  )
+fi
+owner_key=${owner_key:-$adopt_key}
+[[ -f $owner_key && -f ${owner_key%.pub} ]] || fail "$owner_key needs its private key next to it, to log in afterwards"
+
+sudo_mode=$(choose "$sudo_mode" "When something on $device needs sudo" \
+  "password - ask for $user's password on this computer" \
+  "passwordless - sudo without a password, for unattended jobs")
+session=$(choose "$session" "What $device boots into" \
+  "headless - no desktop, for use over SSH" \
+  "desktop - Omarchy's desktop, like any install")
+
+if $password_stdin; then
+  IFS= read -r password
+elif interactive; then
+  while true; do
+    password=$(gum input --password --header "Password for $user on $device")
+    confirm=$(gum input --password --header "Confirm the password")
+    [[ -n $password && $password == "$confirm" ]] && break
+    echo "The passwords were empty or did not match; try again." >&2
+  done
+else
+  fail "a password is needed: run in a terminal, or pass --password-stdin"
+fi
+[[ -n $password ]] || fail "the password is empty"
+
+password_hash=$(printf '%s' "$password" | openssl passwd -6 -stdin)
+unset password confirm
+
+owner=$(jq -n \
+  --arg username "$user" --arg full_name "$full_name" --arg password_hash "$password_hash" \
+  --arg hostname "$new_hostname" --arg timezone "$timezone" --arg keyboard "$keyboard" \
+  --arg sudo "$sudo_mode" --arg session "$session" \
+  --argjson authorized_keys "$(grep -Ev '^(#|$)' "$owner_key" | jq -R . | jq -s .)" \
+  '{username: $username, full_name: $full_name, password_hash: $password_hash, hostname: $hostname,
+    timezone: $timezone, keyboard: $keyboard, sudo: $sudo, session: $session, authorized_keys: $authorized_keys}')
+
+# ── Adopt ────────────────────────────────────────────────────────────────────
+
+mkdir -p "$inventory"
+chmod 700 "$inventory"
+# A device waiting to be adopted is a fresh install with a fresh host key;
+# trust it on first use under its new name, as ssh <name> will look it up.
+ssh-keygen -R "$new_hostname" -f "$known_hosts" >/dev/null 2>&1 || true
+
+ssh_options=(
+  -p "$port" -i "${adopt_key%.pub}" -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=10
+  -o HostKeyAlias="$new_hostname" -o UserKnownHostsFile="$known_hosts" -o StrictHostKeyChecking=accept-new
+)
+
+echo "Adopting $device at $address"
+if ! ssh "${ssh_options[@]}" "root@$address" test -f /var/lib/omarchy/provisioning/appliance; then
+  fail "$device is not waiting for this computer: it needs an appliance install built with $adopt_key"
+fi
+
+ssh "${ssh_options[@]}" "root@$address" omarchy-provision-owner --from-file - <<<"$owner"
+
+jq -n \
+  --arg name "$new_hostname" --arg user "$user" --arg key "${owner_key%.pub}" --arg address "$address" \
+  --arg host "${address_override:+$address}" --argjson port "$port" \
+  --arg sudo "$sudo_mode" --arg session "$session" --arg adopted_at "$(date -Is)" \
+  --argjson record "$record" \
+  '{name: $name, host: (if $host != "" then $host else "\($name).local" end), port: $port, address: $address,
+    user: $user, key: $key, sudo: $sudo, session: $session, adopted_at: $adopted_at,
+    platform: $record.platform, model: $record.model}' \
+  >"$inventory/$new_hostname.json"
+[[ $new_hostname == "$device" ]] || rm -f "$inventory/$device.json"
+omarchy-device-ssh-config
+
+# The new name takes a moment to reach mDNS; check the owner's login by address.
+if ssh -o BatchMode=yes -o ConnectTimeout=10 -o HostName="$address" "$new_hostname" true; then
+  echo "Adopted. Connect with: ssh $new_hostname"
+else
+  fail "adopted, but $user could not log in to $address with ${owner_key%.pub}"
+fi

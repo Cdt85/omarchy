@@ -1,0 +1,46 @@
+#!/bin/bash
+
+# omarchy:summary=Write the SSH config that lets ssh <device> reach every adopted device
+# omarchy:hidden=true
+
+# One Host block per device in ~/.config/omarchy/devices, in a file of its own
+# that ~/.ssh/config includes, so ssh, scp and anything built on them (Local
+# AI, rsync) reach a device by name with the key it was adopted with. Host keys
+# are pinned per device name (HostKeyAlias), so a new address or .local name
+# never asks again, and a reinstalled device is refused until adopted anew.
+
+set -euo pipefail
+
+inventory=${OMARCHY_DEVICES_DIR:-$HOME/.config/omarchy/devices}
+ssh_dir=${OMARCHY_SSH_DIR:-$HOME/.ssh}
+config=$ssh_dir/config.d/omarchy-devices
+known_hosts=$inventory/known_hosts
+
+mkdir -p "$ssh_dir/config.d"
+chmod 700 "$ssh_dir"
+
+{
+  echo "# Written by omarchy device from $inventory; edits are replaced."
+  for device in "$inventory"/*.json; do
+    [[ -e $device ]] || continue
+    jq -r --arg known_hosts "$known_hosts" '
+      "",
+      "Host \(.name)",
+      "  HostName \(.host)",
+      "  Port \(.port // 22)",
+      "  User \(.user)",
+      "  IdentityFile \(.key)",
+      "  IdentitiesOnly yes",
+      "  HostKeyAlias \(.name)",
+      "  UserKnownHostsFile \($known_hosts)"' "$device"
+  done
+} >"$config.new"
+mv "$config.new" "$config"
+
+# Include applies to every host only ahead of the first Host block.
+touch "$ssh_dir/config"
+if ! grep -qxF "Include $config" "$ssh_dir/config"; then
+  printf 'Include %s\n\n%s' "$config" "$(cat "$ssh_dir/config")" >"$ssh_dir/config.new"
+  mv "$ssh_dir/config.new" "$ssh_dir/config"
+fi
+chmod 600 "$ssh_dir/config"

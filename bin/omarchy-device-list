@@ -1,0 +1,57 @@
+#!/bin/bash
+
+# omarchy:summary=List devices waiting to be adopted on the network and the ones already adopted
+# omarchy:args=[--json]
+
+# Waiting devices are appliance installs advertising _omarchy-adopt._tcp over
+# mDNS; adopted ones come from ~/.config/omarchy/devices. --json prints one
+# array for scripts and the shell.
+
+set -euo pipefail
+
+inventory=${OMARCHY_DEVICES_DIR:-$HOME/.config/omarchy/devices}
+
+# avahi-browse -p lines for resolved services:
+#   =;iface;IPv4;name;_omarchy-adopt._tcp;local;host.local;address;port;"k=v" "k=v"
+# One object per device, IPv4 preferred over IPv6.
+waiting() {
+  avahi-browse --resolve --parsable --terminate --no-db-lookup _omarchy-adopt._tcp 2>/dev/null |
+    jq -R -s '
+      split("\n")
+      | map(select(startswith("=;")) | split(";"))
+      | map({
+          name: .[3],
+          host: .[6],
+          address: .[7],
+          family: .[2],
+          txt: ([.[9] | scan("\"([^\"]*)\"") | .[0] | capture("^(?<key>[^=]+)=(?<value>.*)$")] | from_entries)
+        })
+      | sort_by(.family != "IPv4")
+      | unique_by(.name)
+      | map({name, host, address, state: "waiting", platform: .txt.platform, model: .txt.model, version: .txt.version})'
+}
+
+adopted() {
+  local files=("$inventory"/*.json)
+  if [[ -e ${files[0]} ]]; then
+    jq -s 'map(. + {state: "adopted"})' "${files[@]}"
+  else
+    echo '[]'
+  fi
+}
+
+# A reinstalled device advertises again; waiting wins so it can be adopted anew.
+devices=$(jq -s 'add | unique_by(.name)' <(waiting) <(adopted))
+
+if [[ ${1:-} == "--json" ]]; then
+  printf '%s\n' "$devices"
+  exit 0
+fi
+
+if [[ $(jq length <<<"$devices") == 0 ]]; then
+  echo "No devices found. Waiting devices advertise themselves on this network over mDNS."
+  exit 0
+fi
+
+jq -r '.[] | [.name, .state, (.address // .host // ""), (.model // .platform // "")] | @tsv' <<<"$devices" |
+  column -t -s $'\t' -N DEVICE,STATE,ADDRESS,MODEL

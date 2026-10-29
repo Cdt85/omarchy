@@ -1,0 +1,53 @@
+#!/bin/bash
+
+# omarchy:summary=Run a command on an adopted device, asking here for its sudo password when it needs one
+# omarchy:args=<device> [--sudo] [--] <command...>
+# omarchy:examples=omarchy device run spark-7649 -- nvidia-smi | omarchy device run spark-7649 --sudo -- pacman -Syu
+
+# With --sudo the command runs as root. A device adopted with passwordless sudo
+# runs it straight through. Otherwise the owner's password is asked for on this
+# computer, where someone is, rather than on the device, where a job would sit
+# waiting for a prompt nobody sees: in the terminal, or through the program
+# OMARCHY_DEVICE_ASKPASS names (given the prompt, it prints the password).
+
+set -euo pipefail
+
+usage() {
+  echo "Usage: omarchy device run <device> [--sudo] [--] <command...>" >&2
+  exit 1
+}
+
+(($# > 0)) || usage
+device=$1
+shift
+use_sudo=false
+if [[ ${1:-} == "--sudo" ]]; then
+  use_sudo=true
+  shift
+fi
+[[ ${1:-} != "--" ]] || shift
+(($# > 0)) || usage
+
+command=$(printf '%q ' "$@")
+
+if ! $use_sudo; then
+  exec ssh "$device" "$command"
+fi
+
+if ssh "$device" sudo -n true 2>/dev/null; then
+  exec ssh "$device" "sudo -n -- $command"
+fi
+
+prompt="sudo password on $device"
+if [[ -n ${OMARCHY_DEVICE_ASKPASS:-} ]]; then
+  password=$("$OMARCHY_DEVICE_ASKPASS" "$prompt")
+elif [[ -t 0 ]]; then
+  password=$(gum input --password --header "$prompt")
+else
+  echo "Error: $device needs a sudo password; run this in a terminal or set OMARCHY_DEVICE_ASKPASS" >&2
+  exit 1
+fi
+
+# The password is the first line sudo -S reads; the command gets no other
+# standard input.
+ssh "$device" "sudo -S -p '' -- $command" <<<"$password"

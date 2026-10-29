@@ -1,0 +1,20 @@
+#!/bin/bash
+
+# omarchy:summary=Print the public key appliance images are built with, creating it the first time
+
+# omarchy-iso-make --appliance "$(omarchy device key)" builds an image only
+# this computer can adopt, and omarchy device adopt logs in with the private
+# half. The same key becomes the owner's on every device adopted with it,
+# unless adopt is given another.
+
+set -euo pipefail
+
+key=${OMARCHY_DEVICE_KEY:-$HOME/.ssh/omarchy-adopt}
+
+if [[ ! -f $key ]]; then
+  mkdir -p "${key%/*}"
+  chmod 700 "${key%/*}"
+  ssh-keygen -q -t ed25519 -N "" -C "omarchy-adopt@$(hostnamectl hostname 2>/dev/null || hostname)" -f "$key" >&2
+fi
+
+printf '%s\n' "$key.pub"

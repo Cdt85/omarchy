@@ -4,6 +4,10 @@
 # omarchy:requires-sudo=true
 # omarchy:hidden=true
 
+# omarchy-provision-owner --from-file <file|-> sets the owner up from JSON
+# instead, with nobody at the console: how omarchy device adopt finishes an
+# appliance install over SSH (see provision_from_file below).
+#
 # Runs on tty1 via omarchy-provision-owner.service when /var/lib/omarchy/provisioning/pending
 # exists — the state a deferred-provisioning ISO install or omarchy-system-factory-reset leaves
 # behind. Asks for the user (the configurator's Step 2), creates it with the
@@ -24,7 +28,15 @@ if (( EUID != 0 )); then
   exit 1
 fi
 
-[[ -f $PROVISIONING_DIR/pending ]] || exit 0
+if [[ ! -f $PROVISIONING_DIR/pending ]]; then
+  # The console unit runs at every boot until setup clears this; an adopting
+  # computer needs to hear that there is nothing left to set up.
+  if [[ ${1:-} == "--from-file" ]]; then
+    echo "This machine already has an owner" >&2
+    exit 3
+  fi
+  exit 0
+fi
 
 # Never set up a user on a half-wiped system: while a factory wipe is still
 # pending (i.e. it failed this boot), stand down and let it retry next boot.
@@ -803,8 +815,14 @@ create_user() {
     useradd -m -G "$(user_groups)" -s /bin/bash "$username"
   fi
 
-  printf '%s:%s\n' "$username" "$password" | chpasswd
-  printf '%s:%s\n' root "$password" | chpasswd
+  if [[ -n ${password_hash:-} ]]; then
+    printf '%s:%s\n' "$username" "$password_hash" | chpasswd -e
+    printf '%s:%s\n' root "$password_hash" | chpasswd -e
+  else
+    printf '%s:%s\n' "$username" "$password" | chpasswd
+    printf '%s:%s\n' root "$password" | chpasswd
+  fi
+  [[ -z ${full_name:-} ]] || usermod -c "$full_name" "$username"
 
   # deferred-provisioning installs skip archinstall's create_users, which is what normally
   # uncomments %wheel in /etc/sudoers. Always write the drop-in: detecting an
@@ -1313,6 +1331,175 @@ run_setup() {
   # finished progress bar is the last frame; clearing it for a "Starting
   # Omarchy..." card would only add a flash of screen before the handoff.
 }
+
+# ── Adoption ─────────────────────────────────────────────────────────────────
+#
+# omarchy device adopt runs --from-file over SSH as root on an appliance
+# install, which has no owner, nobody at its console, and the adopting
+# computer's key on root. The owner arrives as JSON:
+#
+#   username, password_hash (crypt(3), as openssl passwd -6 makes),
+#   authorized_keys (array): required
+#   full_name, hostname, timezone, keyboard (a console keymap): optional
+#   sudo: "password" (default) or "passwordless", a permanent grant
+#   session: "headless" (default) or "desktop"
+#
+# The steps are the console setup's, without its screens. The adopting
+# computer hashes the password, so it never reaches this machine; LUKS re-keying
+# needs it in the clear, so an encrypted machine is set up at its console.
+# Success removes root's adoption access and the advertisement.
+
+APPLIANCE_MARKER=$PROVISIONING_DIR/appliance
+ADOPT_ROOT_KEYS=/root/.ssh/authorized_keys
+ADOPT_SSHD_DROPIN=/etc/ssh/sshd_config.d/20-omarchy-adopt.conf
+ADOPT_AVAHI_SERVICE=/etc/avahi/services/omarchy-adopt.service
+SSHD_HARDENING=/etc/ssh/sshd_config.d/10-omarchy-hardening.conf
+
+adopt_fail() {
+  echo "Error: $*" >&2
+  log_step "adoption refused: $*"
+  exit 1
+}
+
+adopt_field() {
+  jq -r --arg key "$1" '.[$key] // empty | strings' <<<"$adopt_json"
+}
+
+# Read and check the owner before touching anything; every refusal leaves the
+# machine exactly as it was, still waiting to be adopted.
+adopt_read() {
+  adopt_json=$1
+  jq -e 'type == "object"' >/dev/null 2>&1 <<<"$adopt_json" || adopt_fail "the owner is not a JSON object"
+
+  username=$(adopt_field username)
+  password_hash=$(adopt_field password_hash)
+  full_name=$(adopt_field full_name)
+  hostname=$(adopt_field hostname)
+  timezone=$(adopt_field timezone)
+  keyboard=$(adopt_field keyboard)
+  adopt_sudo=$(adopt_field sudo)
+  adopt_session=$(adopt_field session)
+  adopt_keys=$(jq -r '.authorized_keys // [] | if type == "array" then .[] | strings else empty end' <<<"$adopt_json")
+
+  [[ $username =~ $OMARCHY_USERNAME_PATTERN ]] || adopt_fail "invalid username '$username'"
+  [[ ! $username =~ $OMARCHY_RESERVED_USERNAMES ]] || adopt_fail "the username '$username' is reserved"
+  if omarchy_username_taken "$username" && [[ $(cat "$PROVISIONING_DIR/setup-user" 2>/dev/null) != "$username" ]]; then
+    adopt_fail "the username '$username' is taken"
+  fi
+  [[ $password_hash =~ ^\$(6|5|y|gy|2[aby])\$ ]] || adopt_fail "password_hash must be a crypt(3) hash"
+  [[ $full_name != *[:$'\n']* ]] || adopt_fail "full_name cannot contain ':' or a newline"
+  [[ -z $hostname || $hostname =~ $OMARCHY_HOSTNAME_PATTERN ]] || adopt_fail "invalid hostname '$hostname'"
+  [[ -z $timezone || -f /usr/share/zoneinfo/$timezone ]] || adopt_fail "unknown timezone '$timezone'"
+  [[ ${adopt_sudo:=password} =~ ^(password|passwordless)$ ]] || adopt_fail "sudo must be password or passwordless"
+  [[ ${adopt_session:=headless} =~ ^(headless|desktop)$ ]] || adopt_fail "session must be headless or desktop"
+
+  [[ -n $adopt_keys ]] || adopt_fail "authorized_keys must hold at least one key"
+  local key
+  while IFS= read -r key; do
+    ssh-keygen -lf /dev/stdin <<<"$key" >/dev/null 2>&1 || adopt_fail "not an SSH public key: ${key:0:40}"
+  done <<<"$adopt_keys"
+
+  if encrypted_install || luks_rekey_pending; then
+    adopt_fail "this machine is encrypted; set it up at its console to re-key the disk"
+  fi
+}
+
+# The owner logs in with the keys the adopting computer chose, and only with
+# them: password logins stay off, as omarchy-setup-security-sshd leaves them.
+adopt_ssh() {
+  printf '%s\n' "$adopt_keys" >"$PROVISIONING_DIR/authorized_keys"
+  chmod 600 "$PROVISIONING_DIR/authorized_keys"
+  install_authorized_keys
+
+  install -Dm644 /dev/stdin "$SSHD_HARDENING" <<'CONF'
+# Written by omarchy-setup-security-sshd once an SSH key was authorized.
+# Delete this file and reload sshd to allow password logins again.
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+CONF
+}
+
+adopt_sudo_policy() {
+  [[ $adopt_sudo == "passwordless" ]] || return 0
+  local uid
+  uid=$(id -u "$username")
+  # The command's own grant, so omarchy-sudo-passwordless --disable revokes it.
+  SUDO_UID=$uid "$OMARCHY_PATH/bin/omarchy-sudo-passwordless" __enable "$uid" permanent
+}
+
+adopt_session_mode() {
+  if [[ $adopt_session == "desktop" ]]; then
+    configure_login
+    "$OMARCHY_PATH/bin/omarchy-system-headless" off
+    # As at the console, where SDDM starts once setup exits: the owner's first
+    # login comes up now on any attached screen, without a reboot.
+    systemctl start --no-block sddm.service
+  else
+    "$OMARCHY_PATH/bin/omarchy-system-headless" on
+  fi
+}
+
+# Root's adoption access and the advertisement go last, once the owner can log
+# in. The adopting computer's session stays up; sshd reloads without dropping it.
+adopt_close() {
+  rm -f "$ADOPT_ROOT_KEYS" "$ADOPT_SSHD_DROPIN" "$ADOPT_AVAHI_SERVICE" "$APPLIANCE_MARKER"
+  sshd -t || adopt_fail "sshd rejected its configuration after adoption"
+  systemctl reload sshd.service
+  # A restart, not a reload: avahi publishes the hostname it started with.
+  systemctl try-restart avahi-daemon.service || true
+}
+
+provision_from_file() {
+  local input=$1 json step
+  if [[ $input == "-" ]]; then
+    json=$(cat)
+  else
+    json=$(<"$input")
+  fi
+
+  touch "$LOG_FILE"
+  chmod 600 "$LOG_FILE"
+  adopt_read "$json"
+
+  "$OMARCHY_PATH/bin/omarchy-lifecycle-dispatch" provision-prepare >>"$LOG_FILE" 2>&1 ||
+    adopt_fail "the boot package could not prepare this machine for setup"
+
+  for step in \
+    "creating $username:create_user" \
+    "authorizing SSH keys:adopt_ssh" \
+    "setting hostname:configure_hostname" \
+    "setting timezone:configure_timezone" \
+    "setting keyboard:adopt_keyboard" \
+    "setting up sudo:adopt_sudo_policy" \
+    "finalizing $username:adopt_finalize" \
+    "choosing the $adopt_session session:adopt_session_mode" \
+    "closing adoption access:adopt_close"; do
+    echo "› ${step%%:*}"
+    log_step "${step%%:*}"
+    "${step##*:}" >>"$LOG_FILE" 2> >(tee -a "$LOG_FILE" >&2) || adopt_fail "${step%%:*} failed (details in $LOG_FILE)"
+  done
+
+  cleanup_oem_state
+  log_step "adopted"
+  echo "Adopted as ${hostname:-$(hostnamectl hostname 2>/dev/null)} for $username"
+}
+
+# As in the console setup, a user whose finalization reported errors can still
+# log in and run omarchy-provision-user again; say so and carry on.
+adopt_finalize() {
+  finalize_user || echo "Warning: finalizing $username reported errors (details in $LOG_FILE)" >&2
+}
+
+adopt_keyboard() {
+  [[ -n ${keyboard:-} ]] || return 0
+  apply_keyboard "$keyboard"
+}
+
+if [[ ${1:-} == "--from-file" ]]; then
+  [[ -n ${2:-} ]] || adopt_fail "--from-file needs a file, or - for standard input"
+  provision_from_file "$2"
+  exit 0
+fi
 
 # A failed first-boot setup must not strand the machine at a user-less login
 # screen. Each attempt runs as its own process — bash ignores errexit inside

@@ -9,6 +9,12 @@ libva-nvidia-driver
 nvidia-container-toolkit
 # The ConnectX-7 network's RDMA userspace and module loading.
 rdma-core
+# Firmware discovery and the checks docs/gb10-hardware.md asks for. Firmware
+# updates stay manual: fwupd only lists them.
+fwupd
+ethtool
+nvme-cli
+smartmontools
 # NVIDIA's GPU profilers.
 nsight-compute
 nsight-systems
